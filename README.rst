@@ -9,7 +9,7 @@ to for Seabird_ cnv files.
 .. _Seabird: http://www.seabird.com/
 
 Install
--------
+=======
 
 The package was developed using python 3.5+, it might work with
 earlier versions, but its not supported. The newest
@@ -18,7 +18,7 @@ depends also on python 3.5+, pycnv heavily depends on the gsw toolbox. It
 therefore strongly recommended to use python 3.5+.
 
 User
-____
+----
 
 Install as a user
 
@@ -35,7 +35,7 @@ pip uninstall pyctd
 
 
 Developer
-_________
+---------
 
 Install as a developer
 
@@ -53,7 +53,7 @@ Uninstall as a user
 
 
 Seabird
--------
+=======
 
 The cnv text files are the standard output files of the Seabird CTD
 software. The files are processed with the "pycnv" tools found in the
@@ -118,7 +118,7 @@ The package installs the executables:
 - pycnv_sum_folder
 
   
-EXAMPLES 
+EXAMPLES
 --------
 Plot the in Situ temperature and the conservative temperature of a CTD cast:
 
