@@ -1,5 +1,6 @@
 import datetime
 from pytz import timezone
+import math
 import numpy
 import logging
 import sys
@@ -45,15 +46,157 @@ class pymrd():
         self.axes    = []        
         # Opening file for reading
         try:
-            raw = f = open(self.filename,'rb')
+            self.f = open(self.filename,'rb')
         except Exception as e:
             logger.critical('Could not open file:' + self.filename + '( ' + str(e) + ' )')
-            self.valid_cnv = False
+            self.valid_mrd = False
             return
-        #print('Hallo!',raw)
-        # Find the header and store it
-        #header = self._get_header(raw)
-        #self._parse_header()
+
+        
+        self.read_MRD(pos_time_only = only_metadata) # Reading the binary 
+        self._parse_header()
+
+    def _parse_header(self):
+        """ Parsing the header of the MRD file
+        """
+        header = self.header
+
+        ind_ship = header.find('Ship    :   ') + len('Ship    :   ')
+        ship = header[ind_ship:ind_ship+8]
+        ship = ship.rstrip('_')
+
+        ind_cruise = header.find('Cruise:') + len('Cruise:')
+        cruise = header[ind_cruise+1:ind_cruise+18]
+        cruise = cruise.rstrip('_')
+        hs = header.split('\\r')
+        sensor_str = []
+        for i in range(17,len(hs)-1):
+            sensor_str.append(hs[i])
+            if(hs[i].find('107') >=0):
+                mss = hs[i].split(' ')[1]
+
+        self.cruise = cruise
+        self.ship   = ship
+        self.mss    = mss
+        self.valid_mrd = True
+
+
+    def read_MRD(self,pos_time_only = False):
+        """ Getting metadata from an SST MRD file
+        Args:
+           pos_time_only: Read as much information to get date and position
+        """
+        
+        f = self.f
+
+        n = 0
+        np = 0 # Number of packets
+        end_of_header = 0
+        end_of_header_tmp = 0
+        IN_HEADER = True
+        header    = b''
+        HAVE_TIME = False
+        HAVE_POS  = False
+
+
+        while True:
+            if HAVE_TIME & HAVE_POS & pos_time_only:
+                break
+
+            if(IN_HEADER):    
+                b = f.read(1)
+                n += 1        
+            else:
+                b = f.read(17)
+                n += 17
+                np += 1 # Number of 17 bytes long data packets (packet type + 8 words (little endian)
+
+            if b != b"":
+                # We are in the data body        
+                if(IN_HEADER == False):
+                    bword = []
+                    for i in range(1,16,2):
+                        bword.append(int.from_bytes(b[i:i+2],byteorder='little'))
+                    if(b[0] == 1):
+                        if(HAVE_TIME == False):
+                            print('Time',b)
+                            year = int(bword[0])
+                            year = bword[0]
+                            month = bword[1]
+                            day = bword[2]
+                            hour = bword[4]
+                            minute = bword[5]
+                            second = bword[6]
+                            print(year,month,day,hour,minute,second)
+                            date = datetime.datetime(year,month,day,hour,minute,second,tzinfo=timezone('UTC'))
+                            self.date = date
+                            HAVE_TIME = True
+
+                    if(b[0] == 3):
+                        if(HAVE_POS == False):
+                            print('Position')                        
+                            # Latitude
+                            latint    = int.from_bytes(b[1:3],byteorder='little')
+                            latsign   = (latint & 0x8000) >> 15
+                            if(latsign == 0):
+                                latsign = -1
+                            lat       = latint & 0x1FFF
+                            latdeg    = (lat - lat%100)/100
+                            latmindec = int.from_bytes(b[3:5],byteorder='little')
+                            digits    = int(math.log10(latmindec)) + 1
+                            latmin    = lat%100 + latmindec / 10**digits
+                            latdec    = latsign * (latdeg + latmin/60)
+                            # Longitude
+                            lonint    = int.from_bytes(b[5:7],byteorder='little')
+                            lonsign   = (lonint & 0x8000) >> 15
+                            if(lonsign == 0):
+                                lonsign = -1                
+                            lon       = lonint & 0x1FFF
+                            londeg    = (lon - lon%100)/100
+                            lonmindec = int.from_bytes(b[7:9],byteorder='little')
+                            digits    = int(math.log10(lonmindec)) + 1
+                            lonmin    = lon%100 + lonmindec / 10**digits
+                            londec    = lonsign * (londeg + lonmin/60 )
+                            # Daytime
+                            tmp = (bword[6]) + (bword[4]&0x000F) * 100000
+                            hour = int((tmp - tmp%10000)/10000)
+                            tmp2 = tmp%10000
+                            minute = int((tmp2 - tmp2%100)/100)
+                            second = tmp2%100
+                            print('GPS',latdec,londec,tmp,hour,minute,second)
+                            self.lon = londec
+                            self.lat = latdec                            
+                            HAVE_POS = True
+
+                    #if(b[0] == 7):
+                    #    print('Sensors',b)
+                    #    input('RE')
+
+                else:
+                    header += b
+                    if(b == b'\x1A'): # Header is filled up with 0x1A until it is dividable by 17
+                        end_of_header = n
+                        # Check if dividable by 17
+                        if((end_of_header)%17 == 0): # Dividable by 17
+                            print('Found a valid header (dividable by 17)')
+                            self.header = str(header)
+                            IN_HEADER = False
+                            #input('FD')
+
+            else:
+                break
+
+
+    def __str__(self):
+        """
+        String format
+        """
+        rstr = ""
+        rstr += "pymrd of " + self.filename
+        rstr += " at Lat: " + str(self.lat)
+        rstr += ", Lon: " + str(self.lon)
+        rstr += ", Date: " + datetime.datetime.strftime(self.date,'%Y-%m-%d %H:%M:%S')
+        return rstr                    
 
 
 

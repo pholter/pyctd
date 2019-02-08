@@ -6,9 +6,10 @@ and Sea &amp; Sun Technology files.
 
 The backbone of the pyctd toolbox are tools to read and process
 different CTD fie formats from different vendors. This includes tools
-to for Seabird_ cnv files.
+to for Seabird_ cnv files and `Sea & Sun Technology`_ (SST) microstructure profilers (MSS).
 
 .. _Seabird: http://www.seabird.com/
+.. _`Sea & Sun Technology` https://www.sea-sun-tech.com/technology.html
 
 Install
 =======
@@ -180,6 +181,14 @@ Devices tested
 - SBE 11plus V 5.1g
 
 - Sea-Bird SBE 9 Software Version 4.206
+
+
+Sea & Sun Technology (SST)
+==========================
+
+The mrd binary files are the standard output files of the MSS-Profiler
+software. The files are processed with the "pymrd" tools found in the
+subfolder "sst"
 
 	  
 
