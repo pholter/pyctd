@@ -9,7 +9,7 @@ different CTD fie formats from different vendors. This includes tools
 to for Seabird_ cnv files and `Sea & Sun Technology`_ (SST) microstructure profilers (MSS).
 
 .. _Seabird: http://www.seabird.com/
-.. _`Sea & Sun Technology` https://www.sea-sun-tech.com/technology.html
+.. _Sea & Sun Technology: https://www.sea-sun-tech.com/technology.html
 
 Install
 =======
