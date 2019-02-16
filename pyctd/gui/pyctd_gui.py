@@ -1,15 +1,14 @@
-
 from ..seabird import pycnv as pycnv
 from ..seabird import pycnv_sum_folder as pycnv_sum_folder
 from ..sst import pymrd as pymrd
 from ..sst import pymrd_sum_folder as pymrd_sum_folder
 import sys
 import os
-import json
 import logging
 import argparse
 import time
 import locale
+import yaml
 
 try:
     from PyQt5 import QtCore, QtGui, QtWidgets
@@ -30,14 +29,18 @@ def create_yaml_summary(summary):
     """ Creates a yaml summary
     """
     print('Create yaml summary')
+    for i in summary['info_dict']:
+        print(i)
 
 class get_valid_files(QtCore.QThread):
     """ A thread to search a directory for valid files
     """
     search_status = QtCore.pyqtSignal(object,int,int,str) # Create a custom signal
-    def __init__(self,foldername):
+    def __init__(self,foldername,search_seabird = True,search_mrd = True):
         QtCore.QThread.__init__(self)
         self.foldername = foldername
+        self.search_seabird = search_seabird
+        self.search_mrd = search_mrd
         
     def __del__(self):
         self.wait()
@@ -49,10 +52,10 @@ class get_valid_files(QtCore.QThread):
         locale.setlocale(locale.LC_TIME, "C")
         data_tmp = pycnv_sum_folder.get_all_valid_files(self.foldername,loglevel = logging.WARNING,status_function=self.status_function)
         self.data = data_tmp
-        data_tmp = pymrd_sum_folder.get_all_valid_files(self.foldername,loglevel = logging.WARNING,status_function=self.status_function)
-
-        for key in self.data.keys():
-            self.data[key].extend(data_tmp[key])
+        if(self.search_mrd):
+            data_tmp = pymrd_sum_folder.get_all_valid_files(self.foldername,loglevel = logging.WARNING,status_function=self.status_function)
+            for key in self.data.keys():
+                self.data[key].extend(data_tmp[key])
         
         
     def status_function(self,i,nf,f):
@@ -107,6 +110,7 @@ class mainWidget(QtWidgets.QWidget):
     def __init__(self,logging_level=logging.INFO):
         QtWidgets.QWidget.__init__(self)
         self.folder_dialog = QtWidgets.QLineEdit(self)
+        self.folder_dialog.setText(os.getcwd()) # Take the local directory as a start
         self.folder_button = QtWidgets.QPushButton('Choose Datafolder')
         self.folder_button.clicked.connect(self.folder_clicked)
         self.search_button = QtWidgets.QPushButton('Search valid data')
@@ -272,7 +276,7 @@ class mainWidget(QtWidgets.QWidget):
             self.status_layout.addWidget(self._f_widget,1,0)
             #self.status_layout.addWidget(self._thread_stop_button,2,0)
             self.status_widget.show()
-            self.search_thread = get_valid_files(foldername)
+            self.search_thread = get_valid_files(foldername,search_seabird=True, search_mrd = False)
             self.search_thread.start()
             self.search_thread.search_status.connect(self.status_function)
             self.search_thread.finished.connect(self.search_finished)
@@ -322,7 +326,7 @@ class mainWidget(QtWidgets.QWidget):
     def create_summary(self):
         """ Creates a summary from the given sum_dict
         """
-        create_yaml_summary(1)
+        create_yaml_summary(self.data)
 
     def load_summary(self):
         print('Load summary')

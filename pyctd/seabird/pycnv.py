@@ -8,6 +8,9 @@ import pkg_resources
 import yaml
 import pylab as pl
 import os
+import hashlib
+
+
 
 standard_name_file = pkg_resources.resource_filename('pyctd', 'rules/standard_names.yaml')
 
@@ -308,7 +311,7 @@ class pycnv(object):
        header_parse: Function for parsing custom header information, will be called like so: header_parse(header_str, self), where self is the pycnv object. The function can thus create fields of the pycnv object. See parse_iow_header() as an example
     
     """
-    def __init__(self,filename, only_metadata = False,verbosity = logging.INFO, naming_rules = standard_name_file,encoding='latin-1',baltic=None, header_parse = parse_iow_header  ):
+    def __init__(self,filename, only_metadata = False,verbosity = logging.INFO, naming_rules = standard_name_file,encoding='latin-1',baltic=None, header_parse = parse_iow_header,calc_sha1=True  ):
         """
         """
         logger.setLevel(verbosity)
@@ -327,6 +330,22 @@ class pycnv(object):
         self.axes    = []        
         # Opening file for reading
         try:
+            # Calculate a md5 hash
+            if(calc_sha1):
+               BLOCKSIZE = 65536
+               hasher = hashlib.sha1()
+               with open(self.filename, 'rb') as afile:
+                   buf = afile.read(BLOCKSIZE)
+                   while len(buf) > 0:
+                      hasher.update(buf)
+                      buf = afile.read(BLOCKSIZE)
+
+               self.sha1 = hasher.hexdigest()
+               afile.close()               
+            else:
+               self.sha1 = None
+               
+            # Opening for reading
             raw = open(self.filename, "r",encoding=encoding)
         except:
             logger.critical('Could not open file:' + self.filename)
@@ -558,7 +577,6 @@ class pycnv(object):
                 datum = line[1]
                 try:
                     self.upload_date = datetime.datetime.strptime(datum,'%b %d %Y %H:%M:%S')
-                    print(self.upload_date)
                     self.upload_date = self.upload_date.replace(tzinfo=timezone('UTC'))
                 except Exception as e:
                     logger.warning('_parse_header() upload time: Could not decode time: ( ' + datum + ' ) ' + str(e))
@@ -703,6 +721,18 @@ class pycnv(object):
             
         self.raw_data = numpy.asarray(data)
 
+        
+    def get_info_dict(self):
+        """ Returns a dictionary with the essential information
+        """
+        info_dict = {}
+        info_dict['lon'] = self.lon
+        info_dict['lat'] = self.lat
+        info_dict['date'] = self.date
+        info_dict['file'] = self.filename
+        info_dict['sha1'] = self.sha1
+        return info_dict
+
     def get_summary(self,header=False):
         """
         Returns a summary of the cnv file in a csv format
@@ -837,7 +867,7 @@ class pycnv(object):
         x_lims     = []        
         for dat_plot in xaxis:
             if dat_plot in self.data:
-                print('Found data to plot in data:' + dat_plot)                
+                #print('Found data to plot in data:' + dat_plot)                
                 x_data.append(self.data[dat_plot])
                 if dat_plot in self.names:
                     x_names.append(self.names[dat_plot])
@@ -944,7 +974,7 @@ class pycnv(object):
                 for d in data_types[data_type]:
                     if d in name:
                         #logger.debug('_get_color(): found data type' + data_type)
-                        print('_get_color(): found data type: ' + d)
+                        #print('_get_color(): found data type: ' + d)
                         if(len(data_colors[data_type])>0):
                             col = data_colors[data_type].pop()
                         else:
@@ -992,7 +1022,7 @@ the spines of the additional axes such that all ticks are visible
         y_top     = []
         i_bottom  = -1
         i_top     = -1
-        print('posy',posy)
+        #print('posy',posy)
         for i in range(0,naxes):
             if(i%2 == 0):
                 i_bottom += 1
@@ -1012,7 +1042,7 @@ the spines of the additional axes such that all ticks are visible
         ax.set_position(pos_new)                
         # Create new axes
         for i in range(0,naxes):
-            print('Creating new axes')
+            #print('Creating new axes')
             if(i>0):
                 # This is a nasty hack, otherwise a same position will result in the same axes
                 pos_new[0] += 1e-12
@@ -1031,7 +1061,7 @@ the spines of the additional axes such that all ticks are visible
                     sp.set_visible(False)
 
             if(i%2 == 0):
-                print('y_bottom',y_bottom[i])
+                #print('y_bottom',y_bottom[i])
                 axtmp.spines["bottom"].set_position(("axes", y_bottom[i]))
                 if(naxes > 1): # Only remove the top spines if we have more than one axes
                     axtmp.spines["top"].set_visible(False)
@@ -1040,7 +1070,7 @@ the spines of the additional axes such that all ticks are visible
                 axtmp.xaxis.set_ticks_position("bottom")
                 axtmp.xaxis.set_label_position('bottom') 
             else:
-                print('y_top',y_top[i])
+                #print('y_top',y_top[i])
                 axtmp.spines["top"].set_position(("axes", y_top[i]))
                 axtmp.spines["top"].set_visible(True)
                 axtmp.spines["top"].set_color(xcolors[i])
@@ -1065,10 +1095,11 @@ the spines of the additional axes such that all ticks are visible
             pltmp = axtmp.plot(xdata[i][ind],ydata[ind],color=xcolors[i])
 
             if xlims[i] is not None:
-                print('ranges!')
+                #print('ranges!')
                 axtmp.set_xlim(xlims[i])
             else:
-                print('no ranges!')
+                pass
+                #print('no ranges!')
             axtmp.xaxis.label.set_color(xcolors[i])
             axtmp.tick_params(axis='x', colors=xcolors[i])
             #axtmp.xaxis.label.set_label(xnames[i])
@@ -1129,7 +1160,7 @@ the spines of the additional axes such that all ticks are visible
     def write_nc(self,filename):
         """ Writes a netCDF4 file of the current pycnv object
         """
-        print(filename)
+        print('write_nc() not implemented yet! Sorry for that ...',filename)
 
         
     def __str__(self):
