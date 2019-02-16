@@ -78,7 +78,7 @@ class pymrd():
         self.cruise = cruise
         self.ship   = ship
         self.mss    = mss
-        self.valid_mrd = True
+
 
 
     def read_MRD(self,pos_time_only = False):
@@ -119,7 +119,6 @@ class pymrd():
                         bword.append(int.from_bytes(b[i:i+2],byteorder='little'))
                     if(b[0] == 1):
                         if(HAVE_TIME == False):
-                            print('Time',b)
                             year = int(bword[0])
                             year = bword[0]
                             month = bword[1]
@@ -127,14 +126,12 @@ class pymrd():
                             hour = bword[4]
                             minute = bword[5]
                             second = bword[6]
-                            print(year,month,day,hour,minute,second)
                             date = datetime.datetime(year,month,day,hour,minute,second,tzinfo=timezone('UTC'))
                             self.date = date
                             HAVE_TIME = True
 
                     if(b[0] == 3):
                         if(HAVE_POS == False):
-                            print('Position')                        
                             # Latitude
                             latint    = int.from_bytes(b[1:3],byteorder='little')
                             latsign   = (latint & 0x8000) >> 15
@@ -163,7 +160,6 @@ class pymrd():
                             tmp2 = tmp%10000
                             minute = int((tmp2 - tmp2%100)/100)
                             second = tmp2%100
-                            print('GPS',latdec,londec,tmp,hour,minute,second)
                             self.lon = londec
                             self.lat = latdec                            
                             HAVE_POS = True
@@ -178,10 +174,10 @@ class pymrd():
                         end_of_header = n
                         # Check if dividable by 17
                         if((end_of_header)%17 == 0): # Dividable by 17
-                            print('Found a valid header (dividable by 17)')
+                            self.valid_mrd = True                            
+                            #print('Found a valid header (dividable by 17)')
                             self.header = str(header)
                             IN_HEADER = False
-                            #input('FD')
 
             else:
                 break
