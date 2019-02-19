@@ -9,6 +9,13 @@ import argparse
 import time
 import locale
 import yaml
+import pkg_resources
+
+# Get the version
+version_file = pkg_resources.resource_filename('pyctd','VERSION')
+
+with open(version_file) as version_f:
+   version = version_f.read().strip()
 
 try:
     from PyQt5 import QtCore, QtGui, QtWidgets
@@ -25,12 +32,14 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
-def create_yaml_summary(summary):
+def create_yaml_summary(summary,filename):
     """ Creates a yaml summary
     """
-    print('Create yaml summary')
-    for i in summary['info_dict']:
-        print(i)
+    print('Create yaml summary in file:' + filename)
+    print(summary)
+    with open(filename, 'w') as outfile:
+        yaml.dump(summary, outfile, default_flow_style=False)
+
 
 class get_valid_files(QtCore.QThread):
     """ A thread to search a directory for valid files
@@ -135,6 +144,8 @@ class mainWidget(QtWidgets.QWidget):
         self.layout.addWidget(self.file_table,2,0,1,2)
         self.layout.addWidget(self.clear_table_button,3,0)
         self.dpi       = 100
+        self.data = {}
+        self._cruise_fields = {}        
 
     def plot_map_opts(self):
         print('Plot map options')        
@@ -218,7 +229,7 @@ class mainWidget(QtWidgets.QWidget):
             print(row)
             lon = self.data['lon'][row]
             lat = self.data['lat'][row]
-            self.data['plot_map'][row].append(self.axes.plot(lon,lat,'o',transform=ccrs.PlateCarree()))
+            self.data['pyctd_plot_map'][row].append(self.axes.plot(lon,lat,'o',transform=ccrs.PlateCarree()))
 
         self.canvas.draw()
         
@@ -231,8 +242,8 @@ class mainWidget(QtWidgets.QWidget):
             
         print('Remove positions', rows)
         for row in rows:
-            while self.data['plot_map'][row]:
-                tmpdata = self.data['plot_map'][row].pop()
+            while self.data['pyctd_plot_map'][row]:
+                tmpdata = self.data['pyctd_plot_map'][row].pop()
                 for line in tmpdata:
                     line.remove()
                 
@@ -243,8 +254,8 @@ class mainWidget(QtWidgets.QWidget):
     def clear_table_clicked(self):
         # Remove from plot
         for row in range(len(self.data['files'])):            
-            while self.data['plot_map'][row]:
-                tmpdata = self.data['plot_map'][row].pop()
+            while self.data['pyctd_plot_map'][row]:
+                tmpdata = self.data['pyctd_plot_map'][row].pop()
                 for line in tmpdata:
                     line.remove()
         try:
@@ -296,7 +307,7 @@ class mainWidget(QtWidgets.QWidget):
         self.status_widget.close()
         self.data = self.search_thread.data
         # Add additional information
-        self.data['plot_map'] = [[]] * len(self.data['files'])
+        self.data['pyctd_plot_map'] = [[]] * len(self.data['files'])
         # Fill the table
         for i in range(len(self.data['files'])):
             self.file_table.insertRow(i)
@@ -323,13 +334,93 @@ class mainWidget(QtWidgets.QWidget):
         #self._i_widget.setText(tstr)
         self._f_widget.setText(fstr)
 
-    def create_summary(self):
+    def create_cast_summary(self):
         """ Creates a summary from the given sum_dict
         """
-        create_yaml_summary(self.data)
+        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for yaml summary","","YAML File (*.yaml);;All Files (*)")
+        if 'yaml' in extension and ('.yaml' not in filename):
+            filename += '.yaml'
+            
+        print('filename',filename,extension)
+        yaml_dict = {}
+        # Add cruise information
+        # Only add fields if they have a string in it
+        yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']
+        yaml_dict['created'] = str(datetime.datetime.now(pytz.utc))
+        yaml_dict['version'] = version
+        
+        yaml_dict['casts'] = self.data['info_dict']
+        # Convert datetime objects into something readable
+        for i,d in enumerate(yaml_dict['casts']):
+            yaml_dict['casts'][i]['date'] = str(d['date'])
+
+        create_yaml_summary(yaml_dict,filename)
+
+    def create_cruise_summary(self):
+        try:
+            self._cruise_fields['Cruise ID']
+        except:
+            msg = QtWidgets.QMessageBox()
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setInformativeText('You have to define at least a cruise ID')
+            retval = msg.exec_()
+            return
+
+        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for yaml cruise summary","","YAML File (*.yaml);;All Files (*)")
+        if 'yaml' in extension and ('.yaml' not in filename):
+            filename += '.yaml'        
+            
+        yaml_dict['created'] = str(datetime.datetime.now(pytz.utc))
+        yaml_dict['version'] = version
+        
+        for k in self._cruise_fields.keys():
+            if(len(self._cruise_fields[k]) > 0):
+                yaml_dict[k] = self._cruise_fields[k]
+
+        
+        create_yaml_summary(yaml_dict,filename)
 
     def load_summary(self):
         print('Load summary')
+
+    def cruise_information(self):
+        print('Cruise information')
+
+        # Check if we have a cruise fields, otherwise create one
+        try:
+            self._cruise_fields['Cruise name']
+        except:
+            self._cruise_fields['Cruise name'] = ''
+            self._cruise_fields['Cruise ID'] = ''            
+            self._cruise_fields['Ship name'] = ''
+            self._cruise_fields['Ship callsign'] = ''
+            self._cruise_fields['Project'] = ''            
+            self._cruise_fields['Principal investigator'] = ''
+            self._cruise_dialogs = {}
+            self.cruise_widget = QtWidgets.QWidget()
+            cruise_layout = QtWidgets.QGridLayout(self.cruise_widget)            
+            for i,f in enumerate(self._cruise_fields.keys()):
+                dialog = QtWidgets.QLineEdit(self)
+                self._cruise_dialogs[f] = dialog
+                cruise_layout.addWidget(QtWidgets.QLabel(f),i,0)
+                cruise_layout.addWidget(dialog,i,1)
+
+            button_apply = QtWidgets.QPushButton('Apply')
+            button_apply.clicked.connect(self._cruise_apply)
+            button_cancel = QtWidgets.QPushButton('Close')
+            button_cancel.clicked.connect(self._cruise_cancel)
+            cruise_layout.addWidget(button_apply,i+1,0)
+            cruise_layout.addWidget(button_cancel,i+1,1)
+            
+        self.cruise_widget.show()
+
+    def _cruise_apply(self):
+        for i,f in enumerate(self._cruise_dialogs.keys()):
+            print(self._cruise_dialogs[f].text())
+            self._cruise_fields[f] = str(self._cruise_dialogs[f].text())
+        
+    def _cruise_cancel(self):
+        self.cruise_widget.hide()
         
         
 
@@ -370,17 +461,24 @@ class pyctdMainWindow(QtWidgets.QMainWindow):
 
 
         sumMenu = mainMenu.addMenu('&Dataset')
-        sumAction = QtWidgets.QAction("&Create summary", self)
-        sumAction.triggered.connect(self.mainwidget.create_summary)        
+        sumcruiseAction = QtWidgets.QAction("&Create cruise summary", self)
+        sumcruiseAction.triggered.connect(self.mainwidget.create_cruise_summary)                
+        sumcastAction = QtWidgets.QAction("&Create cast summary", self)
+        sumcastAction.triggered.connect(self.mainwidget.create_cast_summary)        
         sumlAction = QtWidgets.QAction("&Load summary", self)
         sumlAction.triggered.connect(self.mainwidget.load_summary)
-        sumMenu.addAction(sumAction)
+        sumMenu.addAction(sumcruiseAction)
+        sumMenu.addAction(sumcastAction)
         sumMenu.addAction(sumlAction)
 
 
-        tranMenu = mainMenu.addMenu('&Station/Transect')
+        cruiseMenu = mainMenu.addMenu('&Cruise')
+        cruiseAction = QtWidgets.QAction("&Cruise information", self)
+        cruiseAction.setShortcut("Ctrl+I")        
+        cruiseAction.triggered.connect(self.mainwidget.cruise_information)
+        cruiseMenu.addAction(cruiseAction)                
         tranAction = QtWidgets.QAction("&Create Station/Transect", self)
-        tranMenu.addAction(tranAction)        
+        cruiseMenu.addAction(tranAction)        
 
         
         
