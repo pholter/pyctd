@@ -10,6 +10,8 @@ import time
 import locale
 import yaml
 import pkg_resources
+import datetime
+import pytz
 
 # Get the version
 version_file = pkg_resources.resource_filename('pyctd','VERSION')
@@ -73,6 +75,7 @@ class get_valid_files(QtCore.QThread):
 
 class casttableWidget(QtWidgets.QTableWidget):
     plot_signal = QtCore.pyqtSignal(object,str) # Create a custom signal for plotting
+    transect_signal = QtCore.pyqtSignal(object) # Create a custom signal for adding the cast to transect
     def __init__(self):
         QtWidgets.QTableWidget.__init__(self)
 
@@ -81,11 +84,14 @@ class casttableWidget(QtWidgets.QTableWidget):
         self.menu = QtWidgets.QMenu(self)
         plotAction = QtWidgets.QAction('Add to map', self)
         plotAction.triggered.connect(self.plot_map)
+        transectAction = QtWidgets.QAction('Add/Rem to Station/Transect', self)
+        transectAction.triggered.connect(self.transect)
         remplotAction = QtWidgets.QAction('Rem from map', self)
         remplotAction.triggered.connect(self.rem_from_map)
         plotcastAction = QtWidgets.QAction('Plot cast', self)
         plotcastAction.triggered.connect(self.plot_cast)                
         print(QtGui.QCursor.pos())
+        self.menu.addAction(transectAction)
         self.menu.addAction(plotAction)
         self.menu.addAction(remplotAction)
         self.menu.addAction(plotcastAction)        
@@ -99,6 +105,12 @@ class casttableWidget(QtWidgets.QTableWidget):
         self.rows = list(self.rows)
         print('Rows',self.rows)
         #action = self.menu.exec_(QtGui.QCursor.pos())#self.mapToGlobal(event))
+
+    def transect(self):
+        """ Signal for transect
+        """
+        row_list = self.rows
+        self.transect_signal.emit(row_list) # Emit the signal with the row list and the command        
 
     def plot_map(self):
         row_list = self.rows
@@ -128,9 +140,10 @@ class mainWidget(QtWidgets.QWidget):
         self.clear_table_button.clicked.connect(self.clear_table_clicked)                        
         self.file_table = casttableWidget() # QtWidgets.QTableWidget()
         self.file_table.plot_signal.connect(self.plot_signal) # Custom signal for plotting
-        self._ncolumns = 5
+        self.file_table.transect_signal.connect(self.transect_signal) # Custom signal for adding casts to transect
+        self._ncolumns = 6
         self.file_table.setColumnCount(self._ncolumns)
-        self.file_table.setHorizontalHeaderLabels("Date;Lon;Lat;Station/Transect;File".split(";"))
+        self.file_table.setHorizontalHeaderLabels("Date;Lon;Lat;Station/Transect;Comment;File".split(";"))
         for i in range(self._ncolumns):
             self.file_table.horizontalHeaderItem(i).setTextAlignment(QtCore.Qt.AlignHCenter)
             
@@ -185,13 +198,19 @@ class mainWidget(QtWidgets.QWidget):
         #ax.draw()
         self.figwidget.show()
 
+    def transect_signal(self,rows):
+        print('Transect signal')
+        for i in rows:
+            print(i)
+
+            
     def plot_signal(self,rows,command):
         if(command == 'add to map'):
             self.add_positions_to_map(rows)
         elif(command == 'rem from map'):
             self.rem_positions_from_map(rows)
         elif(command == 'plot cast'):
-            self.plot_cast(rows)
+            self.plot_cast(rows)            
 
     def plot_cast(self,row):
         """ Plots a single CTD cast
@@ -268,6 +287,7 @@ class mainWidget(QtWidgets.QWidget):
     def folder_clicked(self):
         foldername = str(QtWidgets.QFileDialog.getExistingDirectory(self, "Select Directory"))
         self.folder_dialog.setText(foldername)
+        self.foldername = foldername
 
     def search_opts_clicked(self):
         self.search_opts_widget      = QtWidgets.QWidget()
@@ -275,6 +295,7 @@ class mainWidget(QtWidgets.QWidget):
 
     def search_clicked(self):
         foldername = self.folder_dialog.text()
+        self.foldername = self.folder_dialog.text()
         if(os.path.exists(foldername)):
             self.status_widget       = QtWidgets.QWidget()
             self.status_layout       = QtWidgets.QGridLayout(self.status_widget)
@@ -319,7 +340,7 @@ class mainWidget(QtWidgets.QWidget):
             lat = self.data['lat'][i]
             self.file_table.setItem(i,2, QtWidgets.QTableWidgetItem( "{:6.3f}".format(lat)))
             fname = self.data['files'][i]
-            self.file_table.setItem(i,4, QtWidgets.QTableWidgetItem( fname ))
+            self.file_table.setItem(i,self._ncolumns-1, QtWidgets.QTableWidgetItem( fname ))
 
         # Resize the columns
         self.file_table.resizeColumnsToContents()        
@@ -337,6 +358,9 @@ class mainWidget(QtWidgets.QWidget):
     def create_cast_summary(self):
         """ Creates a summary from the given sum_dict
         """
+
+        cwd = os.getcwd()
+        FLAG_REL_PATH = True
         filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for yaml summary","","YAML File (*.yaml);;All Files (*)")
         if 'yaml' in extension and ('.yaml' not in filename):
             filename += '.yaml'
@@ -344,8 +368,16 @@ class mainWidget(QtWidgets.QWidget):
         print('filename',filename,extension)
         yaml_dict = {}
         # Add cruise information
-        # Only add fields if they have a string in it
-        yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']
+        try:
+            yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']
+        except Exception as e:
+            msg = QtWidgets.QMessageBox()
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setInformativeText('You did not define a cruise ID, you want to continue? TODO, let the user define a cruise ID and/or cancel this ...')
+            retval = msg.exec_()
+            print(retval)
+
+            
         yaml_dict['created'] = str(datetime.datetime.now(pytz.utc))
         yaml_dict['version'] = version
         
@@ -353,8 +385,13 @@ class mainWidget(QtWidgets.QWidget):
         # Convert datetime objects into something readable
         for i,d in enumerate(yaml_dict['casts']):
             yaml_dict['casts'][i]['date'] = str(d['date'])
+            if(FLAG_REL_PATH):
+                fname = yaml_dict['casts'][i]['file']
+                fname = fname.replace(self.foldername,'.') # TODO, check if filesep is needed for windows
+                yaml_dict['casts'][i]['file'] = fname
+                print(self.foldername,fname)
 
-        create_yaml_summary(yaml_dict,filename)
+        #create_yaml_summary(yaml_dict,filename)
 
     def create_cruise_summary(self):
         try:
