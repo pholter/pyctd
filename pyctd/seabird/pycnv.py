@@ -320,8 +320,11 @@ class pycnv(object):
         self.filename = filename
         self.file_type = ''
         self.channels = []
-        self.data = None
-        self.date = None        
+        self.data        = None
+        self.date        = None
+        self.upload_date = None
+        self.start_date  = None
+        self.nmea_date   = None        
         self.lon = numpy.NaN
         self.lat = numpy.NaN
 
@@ -355,6 +358,15 @@ class pycnv(object):
         # Find the header and store it
         header = self._get_header(raw)
         self._parse_header()
+        # Decide which timestamp to use for the date
+        #NMEA UTC (Time)
+        if(self.nmea_date is not None):
+            self.date = self.nmea_date
+        elif(self.upload_date is not None):
+            self.date = self.upload_date
+        elif(self.start_date is not None):
+            self.date = self.start_date            
+            
         # Check if we found channels
         # If yes we have a valid cnv file
         if(len(self.channels) == 0):
@@ -616,9 +628,19 @@ class pycnv(object):
                 #print(pos_str,pos_str_deg,pos_str_min,self.lat)
                 #input('fds')
 
+            if "* NMEA UTC (Time) = " in l:
+                # Like this:
+                #* NMEA UTC (Time) = Feb 21 2019 10:18:21
+                line     = l.split(" = ")
+                line1     = line[1].split(" [")                
+                datum = line1[0]
+                try:
+                    self.nmea_date = datetime.datetime.strptime(datum,'%b %d %Y %H:%M:%S')
+                    self.nmea_date = self.nmea_date.replace(tzinfo=timezone('UTC'))
+                except Exception as e:
+                    logger.warning('parse_header() nmea_time: Could not decode time: ( ' + datum + ' )' + str(e))
 
-
-            
+                    
             if "# start_time = " in l:
                 # Like this:
                 # start_time = May 03 2018 13:02:01 [Instrument's time stamp, header]
@@ -626,10 +648,10 @@ class pycnv(object):
                 line1     = line[1].split(" [")                
                 datum = line1[0]
                 try:
-                    self.date = datetime.datetime.strptime(datum,'%b %d %Y %H:%M:%S')
-                    self.date = self.date.replace(tzinfo=timezone('UTC'))
+                    self.start_date = datetime.datetime.strptime(datum,'%b %d %Y %H:%M:%S')
+                    self.start_date = self.start_date.replace(tzinfo=timezone('UTC'))
                 except Exception as e:
-                    logger.warning('parse_header() NMEA: Could not decode time: ( ' + datum + ' )' + str(e))                    
+                    logger.warning('parse_header() start_time: Could not decode time: ( ' + datum + ' )' + str(e))                    
 
             # Look for sensor names and units of type:
             # # name 4 = t090C: Temperature [ITS-90, deg C]

@@ -138,7 +138,7 @@ def get_all_valid_files(DATA_FOLDER, loglevel = logging.INFO, station = None, sa
 
         ind_sort = numpy.argsort(files_date_save)                
         file_names_save_sort = list(numpy.asarray(file_names_save)[ind_sort])
-        retdata  = {'files':file_names_save_sort,'dates':list(numpy.asarray(files_date_save)[ind_sort]),'lon':list(numpy.asarray(files_lon_save)[ind_sort]),'lat':list(numpy.asarray(files_lat_save)[ind_sort])}
+        retdata  = {'files':file_names_save_sort,'dates':list(numpy.asarray(files_date_save)[ind_sort]),'lon':list(numpy.asarray(files_lon_save)[ind_sort]),'lat':list(numpy.asarray(files_lat_save)[ind_sort]),'info_dict':[]*len(files_lon_save)}
 
         print(retdata)
         if save_summary:

@@ -158,8 +158,56 @@ class mainWidget(QtWidgets.QWidget):
         self.layout.addWidget(self.clear_table_button,3,0)
         self.dpi       = 100
         self.data = {}
-        self._cruise_fields = {}        
+        self._cruise_fields = {}
 
+
+        # Search options widget
+        self.search_opts_widget      = QtWidgets.QWidget()
+        layout       = QtWidgets.QGridLayout(self.search_opts_widget)
+        self._search_opt_cnv = QtWidgets.QCheckBox('Seabird cnv')
+        self._search_opt_mrd = QtWidgets.QCheckBox('Sea & Sun mrd')
+        self._search_opt_cnv.toggle() # put in on
+        self._search_opt_mrd.toggle() # put in on
+        layout.addWidget(self._search_opt_cnv,0,0)
+        layout.addWidget(self._search_opt_mrd,1,0)
+        self.search_opts_widget.hide()
+
+        # Transect/stations widget
+        self._transect_widget      = QtWidgets.QWidget()
+        layout       = QtWidgets.QGridLayout(self._transect_widget)
+        self._new_transect_edit = QtWidgets.QLineEdit(self)
+        layout.addWidget(self._new_transect_edit,0,0)
+        layout.addWidget(QtWidgets.QLabel('Transect/Station name'),0,1)
+        self.transect_combo = QtWidgets.QComboBox()
+        layout.addWidget(self.transect_combo,1,0)
+        button_apply = QtWidgets.QPushButton('Apply')
+        button_apply.clicked.connect(self._transect_apply)
+        button_cancel = QtWidgets.QPushButton('Close')
+        button_cancel.clicked.connect(self._transect_cancel)
+        layout.addWidget(button_apply,2,0)
+        layout.addWidget(button_cancel,2,1)        
+        self._transect_widget.hide()
+
+        
+    def _transect_apply(self):
+        tran_name = self._new_transect_edit.text()
+        FLAG_NEW = True
+        if(len(tran_name) > 0):
+            for count in range(self.transect_combo.count()):
+                if(self.transect_combo.itemText(count) == tran_name):
+                    FLAG_NEW = False
+
+            if FLAG_NEW:
+                self.transect_combo.addItem(tran_name)
+                cnt = self.transect_combo.count()
+                print(cnt)
+                self.transect_combo.setCurrentIndex(cnt-1)
+
+
+    def _transect_cancel(self):
+        self._transect_widget.hide()
+
+        
     def plot_map_opts(self):
         print('Plot map options')        
 
@@ -198,8 +246,10 @@ class mainWidget(QtWidgets.QWidget):
         #ax.draw()
         self.figwidget.show()
 
+        
     def transect_signal(self,rows):
         print('Transect signal')
+        self._transect_widget.show()
         for i in rows:
             print(i)
 
@@ -290,7 +340,7 @@ class mainWidget(QtWidgets.QWidget):
         self.foldername = foldername
 
     def search_opts_clicked(self):
-        self.search_opts_widget      = QtWidgets.QWidget()
+        print('Search opts')
         self.search_opts_widget.show()
 
     def search_clicked(self):
@@ -308,7 +358,7 @@ class mainWidget(QtWidgets.QWidget):
             self.status_layout.addWidget(self._f_widget,1,0)
             #self.status_layout.addWidget(self._thread_stop_button,2,0)
             self.status_widget.show()
-            self.search_thread = get_valid_files(foldername,search_seabird=True, search_mrd = False)
+            self.search_thread = get_valid_files(foldername,search_seabird=self._search_opt_cnv.isChecked(), search_mrd = self._search_opt_mrd.isChecked())
             self.search_thread.start()
             self.search_thread.search_status.connect(self.status_function)
             self.search_thread.finished.connect(self.search_finished)
@@ -483,6 +533,7 @@ class pyctdMainWindow(QtWidgets.QMainWindow):
 
         searchMenu = mainMenu.addMenu('&Search')
         searchoptsAction = QtWidgets.QAction("&Search options", self)
+        searchoptsAction.triggered.connect(self.mainwidget.search_opts_clicked)
         searchMenu.addAction(searchoptsAction)        
 
         plotMenu = mainMenu.addMenu('&Plot')
