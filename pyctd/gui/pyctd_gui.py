@@ -177,9 +177,13 @@ class mainWidget(QtWidgets.QWidget):
         layout       = QtWidgets.QGridLayout(self._transect_widget)
         self._new_transect_edit = QtWidgets.QLineEdit(self)
         layout.addWidget(self._new_transect_edit,0,0)
-        layout.addWidget(QtWidgets.QLabel('Transect/Station name'),0,1)
+        #layout.addWidget(QtWidgets.QLabel('Transect/Station name'),0,0)
+        button_add = QtWidgets.QPushButton('Add Sta./Trans.')
+        button_add.clicked.connect(self._transect_add)
+        layout.addWidget(button_add,0,1)        
         self.transect_combo = QtWidgets.QComboBox()
-        layout.addWidget(self.transect_combo,1,0)
+        self.transect_combo.addItem('Remove')        
+        layout.addWidget(self.transect_combo,1,0,1,2)
         button_apply = QtWidgets.QPushButton('Apply')
         button_apply.clicked.connect(self._transect_apply)
         button_cancel = QtWidgets.QPushButton('Close')
@@ -189,7 +193,7 @@ class mainWidget(QtWidgets.QWidget):
         self._transect_widget.hide()
 
         
-    def _transect_apply(self):
+    def _transect_add(self):
         tran_name = self._new_transect_edit.text()
         FLAG_NEW = True
         if(len(tran_name) > 0):
@@ -203,6 +207,20 @@ class mainWidget(QtWidgets.QWidget):
                 print(cnt)
                 self.transect_combo.setCurrentIndex(cnt-1)
 
+
+    def _transect_apply(self):
+        print('apply')
+        if True:
+            for i in self._transect_rows:
+                tran = self.transect_combo.currentText()
+                if tran == 'Remove':
+                    self.data['pyctd_transect'][i] = None
+                else:
+                    self.data['pyctd_transect'][i] = tran
+
+
+        self.update_table()        
+        self._transect_widget.hide()
 
     def _transect_cancel(self):
         self._transect_widget.hide()
@@ -249,9 +267,8 @@ class mainWidget(QtWidgets.QWidget):
         
     def transect_signal(self,rows):
         print('Transect signal')
-        self._transect_widget.show()
-        for i in rows:
-            print(i)
+        self._transect_rows = rows
+        self._transect_widget.show() # Open the widget and let it decide what to do with the choosen rows
 
             
     def plot_signal(self,rows,command):
@@ -378,17 +395,36 @@ class mainWidget(QtWidgets.QWidget):
         self.status_widget.close()
         self.data = self.search_thread.data
         # Add additional information
-        self.data['pyctd_plot_map'] = [[]] * len(self.data['files'])
-        # Fill the table
-        for i in range(len(self.data['files'])):
+        self.data['pyctd_plot_map'] = [[]] * len(self.data['files']) # Plotting information
+        self.data['pyctd_transect'] = [None] * len(self.data['files']) # transect information
+        try:
+            cnt = len(self.data['files'])
+        except:
+            cnt = 0
+        for i in range(cnt):
             self.file_table.insertRow(i)
+            
+        self.update_table()
 
+    def update_table(self):        
+        # Fill the table
+        try:
+            cnt = len(self.data['files'])
+        except:
+            cnt = 0
+        for i in range(cnt):
             date = self.data['dates'][i]
             self.file_table.setItem(i,0, QtWidgets.QTableWidgetItem( date.strftime('%Y-%m-%d %H:%M:%S' )))
             lon = self.data['lon'][i]
             self.file_table.setItem(i,1, QtWidgets.QTableWidgetItem( "{:6.3f}".format(lon)))
             lat = self.data['lat'][i]
             self.file_table.setItem(i,2, QtWidgets.QTableWidgetItem( "{:6.3f}".format(lat)))
+            tran = self.data['pyctd_transect'][i]
+            if(tran is not None):
+                self.file_table.setItem(i,3, QtWidgets.QTableWidgetItem( str(tran) ))
+            else:
+                self.file_table.setItem(i,3, QtWidgets.QTableWidgetItem( str('') ))
+                
             fname = self.data['files'][i]
             self.file_table.setItem(i,self._ncolumns-1, QtWidgets.QTableWidgetItem( fname ))
 
