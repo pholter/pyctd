@@ -753,6 +753,7 @@ class pycnv(object):
         info_dict['date'] = self.date
         info_dict['file'] = self.filename
         info_dict['sha1'] = self.sha1
+        info_dict['type'] = 'CNV'        
         return info_dict
 
     def get_summary(self,header=False):

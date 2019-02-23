@@ -9,7 +9,7 @@ import pkg_resources
 import yaml
 import pylab as pl
 import os
-
+import hashlib
 
 standard_name_file = pkg_resources.resource_filename('pyctd', 'rules/standard_names.yaml')
 
@@ -30,7 +30,7 @@ class pymrd():
 
     """ 
     def __init__(self,filename, only_metadata = False,verbosity =
-                 logging.INFO, naming_rules = standard_name_file,baltic=None):
+                 logging.INFO, naming_rules = standard_name_file, baltic=None, calc_sha1=True):
         logger.setLevel(verbosity)
         logger.info(' Opening file: ' + filename)
         self.filename = filename
@@ -52,6 +52,26 @@ class pymrd():
             self.valid_mrd = False
             return
 
+        # Opening file for reading and calculating sha1
+        try:
+            # Calculate a md5 hash
+            if(calc_sha1):
+               BLOCKSIZE = 65536
+               hasher = hashlib.sha1()
+               with open(self.filename, 'rb') as afile:
+                   buf = afile.read(BLOCKSIZE)
+                   while len(buf) > 0:
+                      hasher.update(buf)
+                      buf = afile.read(BLOCKSIZE)
+
+               self.sha1 = hasher.hexdigest()
+               afile.close()               
+            else:
+               self.sha1 = None
+        except:
+            logger.critical('Could not open file:' + self.filename)
+            self.valid_mrd = False
+            return
         
         self.read_MRD(pos_time_only = only_metadata) # Reading the binary 
         self._parse_header()
@@ -79,7 +99,19 @@ class pymrd():
         self.ship   = ship
         self.mss    = mss
 
-
+        
+    def get_info_dict(self):
+        """ Returns a dictionary with the essential information
+        """
+        info_dict = {}
+        info_dict['lon'] = self.lon
+        info_dict['lat'] = self.lat
+        info_dict['date'] = self.date
+        info_dict['file'] = self.filename
+        info_dict['sha1'] = self.sha1
+        info_dict['type'] = 'MRD'
+        return info_dict
+    
 
     def read_MRD(self,pos_time_only = False):
         """ Getting metadata from an SST MRD file

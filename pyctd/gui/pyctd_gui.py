@@ -477,7 +477,7 @@ class mainWidget(QtWidgets.QWidget):
                 yaml_dict['casts'][i]['file'] = fname
                 print(self.foldername,fname)
 
-        #create_yaml_summary(yaml_dict,filename)
+        create_yaml_summary(yaml_dict,filename)
 
     def create_cruise_summary(self):
         try:

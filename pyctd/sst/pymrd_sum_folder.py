@@ -88,6 +88,8 @@ def get_all_valid_files(DATA_FOLDER, loglevel = logging.INFO, station = None, sa
     files_lat_save  = []        
     files_date_save = []
     files_summary   = []
+    files_info_dict = []
+    
     if(len(matches) > 0):
         # Write the header of the file
         print('Hallo',matches[0])
@@ -104,6 +106,7 @@ def get_all_valid_files(DATA_FOLDER, loglevel = logging.INFO, station = None, sa
             mrd = pymrd(f,verbosity=loglevel,only_metadata = True)
             if(mrd.valid_mrd):
                 files_date.append(mrd.date)
+                files_info_dict.append(mrd.get_info_dict())
                 #summary = mrd.get_summary()
                 FLAG_GOOD = False
                 # Check if we are within a distance
@@ -138,7 +141,7 @@ def get_all_valid_files(DATA_FOLDER, loglevel = logging.INFO, station = None, sa
 
         ind_sort = numpy.argsort(files_date_save)                
         file_names_save_sort = list(numpy.asarray(file_names_save)[ind_sort])
-        retdata  = {'files':file_names_save_sort,'dates':list(numpy.asarray(files_date_save)[ind_sort]),'lon':list(numpy.asarray(files_lon_save)[ind_sort]),'lat':list(numpy.asarray(files_lat_save)[ind_sort]),'info_dict':[]*len(files_lon_save)}
+        retdata  = {'files':file_names_save_sort,'dates':list(numpy.asarray(files_date_save)[ind_sort]),'lon':list(numpy.asarray(files_lon_save)[ind_sort]),'lat':list(numpy.asarray(files_lat_save)[ind_sort]),'info_dict':list(numpy.asarray(files_info_dict)[ind_sort])}
 
         print(retdata)
         if save_summary:
