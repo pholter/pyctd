@@ -80,7 +80,7 @@ def get_all_valid_files(DATA_FOLDER, loglevel = logging.INFO, station = None, sa
 
     logger.info('Found ' + str(len(matches)) + ' mrd files in folder(s):' + str(DATA_FOLDER))
     if(len(matches) == 0):
-        return {'files':[],'dates':[],'lon':[],'lat':[]}
+        return {'files':[],'dates':[],'lon':[],'lat':[],'info_dict':[]}
     save_file       = []
     files_date      = []
     file_names_save = []

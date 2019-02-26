@@ -12,6 +12,7 @@ import yaml
 import pkg_resources
 import datetime
 import pytz
+import copy
 
 # Get the version
 version_file = pkg_resources.resource_filename('pyctd','VERSION')
@@ -38,7 +39,6 @@ def create_yaml_summary(summary,filename):
     """ Creates a yaml summary
     """
     print('Create yaml summary in file:' + filename)
-    print(summary)
     with open(filename, 'w') as outfile:
         yaml.dump(summary, outfile, default_flow_style=False)
 
@@ -63,10 +63,12 @@ class get_valid_files(QtCore.QThread):
         locale.setlocale(locale.LC_TIME, "C")
         data_tmp = pycnv_sum_folder.get_all_valid_files(self.foldername,loglevel = logging.WARNING,status_function=self.status_function)
         self.data = data_tmp
+        
         if(self.search_mrd):
             data_tmp = pymrd_sum_folder.get_all_valid_files(self.foldername,loglevel = logging.WARNING,status_function=self.status_function)
-            for key in self.data.keys():
-                self.data[key].extend(data_tmp[key])
+            if True:
+                for key in self.data.keys():
+                    self.data[key].extend(data_tmp[key])
         
         
     def status_function(self,i,nf,f):
@@ -75,23 +77,22 @@ class get_valid_files(QtCore.QThread):
 
 class casttableWidget(QtWidgets.QTableWidget):
     plot_signal = QtCore.pyqtSignal(object,str) # Create a custom signal for plotting
-    transect_signal = QtCore.pyqtSignal(object) # Create a custom signal for adding the cast to transect
+    station_signal = QtCore.pyqtSignal(object) # Create a custom signal for adding the cast to station
+    comment_signal = QtCore.pyqtSignal(object) # Create a custom signal for adding the cast to station    
     def __init__(self):
         QtWidgets.QTableWidget.__init__(self)
 
     def contextMenuEvent(self, event):
-        print('Event!')
         self.menu = QtWidgets.QMenu(self)
         plotAction = QtWidgets.QAction('Add to map', self)
         plotAction.triggered.connect(self.plot_map)
-        transectAction = QtWidgets.QAction('Add/Rem to Station/Transect', self)
-        transectAction.triggered.connect(self.transect)
+        stationAction = QtWidgets.QAction('Add/Rem to Station', self)
+        stationAction.triggered.connect(self.station)
         remplotAction = QtWidgets.QAction('Rem from map', self)
         remplotAction.triggered.connect(self.rem_from_map)
         plotcastAction = QtWidgets.QAction('Plot cast', self)
         plotcastAction.triggered.connect(self.plot_cast)                
-        print(QtGui.QCursor.pos())
-        self.menu.addAction(transectAction)
+        self.menu.addAction(stationAction)
         self.menu.addAction(plotAction)
         self.menu.addAction(remplotAction)
         self.menu.addAction(plotcastAction)        
@@ -103,14 +104,13 @@ class casttableWidget(QtWidgets.QTableWidget):
             self.rows.add(idx.row())
 
         self.rows = list(self.rows)
-        print('Rows',self.rows)
         #action = self.menu.exec_(QtGui.QCursor.pos())#self.mapToGlobal(event))
 
-    def transect(self):
-        """ Signal for transect
+    def station(self):
+        """ Signal for station
         """
         row_list = self.rows
-        self.transect_signal.emit(row_list) # Emit the signal with the row list and the command        
+        self.station_signal.emit(row_list) # Emit the signal with the row list and the command
 
     def plot_map(self):
         row_list = self.rows
@@ -132,18 +132,28 @@ class mainWidget(QtWidgets.QWidget):
         QtWidgets.QWidget.__init__(self)
         self.folder_dialog = QtWidgets.QLineEdit(self)
         self.folder_dialog.setText(os.getcwd()) # Take the local directory as a start
+        self.foldername = os.getcwd()        
         self.folder_button = QtWidgets.QPushButton('Choose Datafolder')
         self.folder_button.clicked.connect(self.folder_clicked)
         self.search_button = QtWidgets.QPushButton('Search valid data')
         self.search_button.clicked.connect(self.search_clicked)
-        self.clear_table_button = QtWidgets.QPushButton('Clear')
+        self.clear_table_button = QtWidgets.QPushButton('Clear table')
         self.clear_table_button.clicked.connect(self.clear_table_clicked)                        
         self.file_table = casttableWidget() # QtWidgets.QTableWidget()
         self.file_table.plot_signal.connect(self.plot_signal) # Custom signal for plotting
-        self.file_table.transect_signal.connect(self.transect_signal) # Custom signal for adding casts to transect
+        self.file_table.station_signal.connect(self.station_signal) # Custom signal for adding casts to station
+        self.file_table.cellChanged.connect(self.table_changed)
         self._ncolumns = 6
+        self.columns = {}
+        self.columns['date']    = 0
+        self.columns['lon']     = 1
+        self.columns['lat']     = 2
+        self.columns['station'] = 3
+        self.columns['comment'] = 4
+        self.columns['file']    = 5
+        # TODO, create column names according to the data structures
         self.file_table.setColumnCount(self._ncolumns)
-        self.file_table.setHorizontalHeaderLabels("Date;Lon;Lat;Station/Transect;Comment;File".split(";"))
+        self.file_table.setHorizontalHeaderLabels("Date;Lon;Lat;Station;Comment;File".split(";"))
         for i in range(self._ncolumns):
             self.file_table.horizontalHeaderItem(i).setTextAlignment(QtCore.Qt.AlignHCenter)
             
@@ -156,6 +166,9 @@ class mainWidget(QtWidgets.QWidget):
         self.layout.addWidget(self.search_button,1,0)
         self.layout.addWidget(self.file_table,2,0,1,2)
         self.layout.addWidget(self.clear_table_button,3,0)
+
+
+        self.FLAG_REL_PATH = True
         self.dpi       = 100
         self.data = {}
         self._cruise_fields = {}
@@ -172,70 +185,78 @@ class mainWidget(QtWidgets.QWidget):
         layout.addWidget(self._search_opt_mrd,1,0)
         self.search_opts_widget.hide()
 
-        # Transect/stations widget
-        self._transect_widget      = QtWidgets.QWidget()
-        layout       = QtWidgets.QGridLayout(self._transect_widget)
-        self._new_transect_edit = QtWidgets.QLineEdit(self)
-        layout.addWidget(self._new_transect_edit,0,0)
-        #layout.addWidget(QtWidgets.QLabel('Transect/Station name'),0,0)
-        button_add = QtWidgets.QPushButton('Add Sta./Trans.')
-        button_add.clicked.connect(self._transect_add)
+        # Station/stations widget
+        self._station_widget      = QtWidgets.QWidget()
+        layout       = QtWidgets.QGridLayout(self._station_widget)
+        self._new_station_edit = QtWidgets.QLineEdit(self)
+        layout.addWidget(self._new_station_edit,0,0)
+        #layout.addWidget(QtWidgets.QLabel('Station/Station name'),0,0)
+        button_add = QtWidgets.QPushButton('Add Station')
+        button_add.clicked.connect(self._station_add)
         layout.addWidget(button_add,0,1)        
-        self.transect_combo = QtWidgets.QComboBox()
-        self.transect_combo.addItem('Remove')        
-        layout.addWidget(self.transect_combo,1,0,1,2)
+        self.station_combo = QtWidgets.QComboBox()
+        self.station_combo.addItem('Remove')        
+        layout.addWidget(self.station_combo,1,0,1,2)
         button_apply = QtWidgets.QPushButton('Apply')
-        button_apply.clicked.connect(self._transect_apply)
+        button_apply.clicked.connect(self._station_apply)
         button_cancel = QtWidgets.QPushButton('Close')
-        button_cancel.clicked.connect(self._transect_cancel)
+        button_cancel.clicked.connect(self._station_cancel)
         layout.addWidget(button_apply,2,0)
         layout.addWidget(button_cancel,2,1)        
-        self._transect_widget.hide()
+        self._station_widget.hide()
+
+
+    def table_changed(self,row,column):
+        """ If a comment was added, add it to the comment list and update the data dictionary
+        """
+        if column == self.columns['comment']:
+            comstr = self.file_table.item(row,column).text()
+            self.data['pyctd_comment'][row] = comstr
+            # Resize the columns
+            self.file_table.resizeColumnsToContents()
 
         
-    def _transect_add(self):
-        tran_name = self._new_transect_edit.text()
+    def _station_add(self):
+        tran_name = self._new_station_edit.text()
         FLAG_NEW = True
         if(len(tran_name) > 0):
-            for count in range(self.transect_combo.count()):
-                if(self.transect_combo.itemText(count) == tran_name):
+            for count in range(self.station_combo.count()):
+                if(self.station_combo.itemText(count) == tran_name):
                     FLAG_NEW = False
 
             if FLAG_NEW:
-                self.transect_combo.addItem(tran_name)
-                cnt = self.transect_combo.count()
-                print(cnt)
-                self.transect_combo.setCurrentIndex(cnt-1)
+                self.station_combo.addItem(tran_name)
+                cnt = self.station_combo.count()
+                self.station_combo.setCurrentIndex(cnt-1)
 
 
-    def _transect_apply(self):
-        print('apply')
+    def _station_apply(self):
         if True:
-            for i in self._transect_rows:
-                tran = self.transect_combo.currentText()
+            for i in self._station_rows:
+                tran = self.station_combo.currentText()
                 if tran == 'Remove':
-                    self.data['pyctd_transect'][i] = None
+                    self.data['pyctd_station'][i] = None
                 else:
-                    self.data['pyctd_transect'][i] = tran
+                    self.data['pyctd_station'][i] = tran
 
 
         self.update_table()        
-        self._transect_widget.hide()
+        self._station_widget.hide()
 
-    def _transect_cancel(self):
-        self._transect_widget.hide()
+    def _station_cancel(self):
+        self._station_widget.hide()
 
         
     def plot_map_opts(self):
         print('Plot map options')        
 
     def plot_map(self):
-        try:
-            self.data['lon']
-            self.data['lat']
-        except:
-            print('No data')
-            #return
+        #try:
+        #    self.data['lon']
+        #    self.data['lat']
+        #except:
+        #    print('No data')
+        #    #return
 
         FIG_LON = [-170,180]
         FIG_LAT = [-89,90]
@@ -265,12 +286,11 @@ class mainWidget(QtWidgets.QWidget):
         self.figwidget.show()
 
         
-    def transect_signal(self,rows):
-        print('Transect signal')
-        self._transect_rows = rows
-        self._transect_widget.show() # Open the widget and let it decide what to do with the choosen rows
+    def station_signal(self,rows):
+        self._station_rows = rows
+        self._station_widget.show() # Open the widget and let it decide what to do with the choosen rows
 
-            
+
     def plot_signal(self,rows,command):
         if(command == 'add to map'):
             self.add_positions_to_map(rows)
@@ -282,7 +302,6 @@ class mainWidget(QtWidgets.QWidget):
     def plot_cast(self,row):
         """ Plots a single CTD cast
         """
-        print('Plot cast row',row)
         filename = self.data['files'][row]
         cnv = pycnv(filename)
         self.cast_fig       = Figure(dpi=self.dpi)
@@ -310,11 +329,9 @@ class mainWidget(QtWidgets.QWidget):
         except:
             self.plot_map()
             
-        print('Add positions', rows)
         for row in rows:
-            print(row)
-            lon = self.data['lon'][row]
-            lat = self.data['lat'][row]
+            lon = self.data['info_dict'][row]['lon']
+            lat = self.data['info_dict'][row]['lat']
             self.data['pyctd_plot_map'][row].append(self.axes.plot(lon,lat,'o',transform=ccrs.PlateCarree()))
 
         self.canvas.draw()
@@ -326,7 +343,6 @@ class mainWidget(QtWidgets.QWidget):
         except:
             return
             
-        print('Remove positions', rows)
         for row in rows:
             while self.data['pyctd_plot_map'][row]:
                 tmpdata = self.data['pyctd_plot_map'][row].pop()
@@ -357,7 +373,6 @@ class mainWidget(QtWidgets.QWidget):
         self.foldername = foldername
 
     def search_opts_clicked(self):
-        print('Search opts')
         self.search_opts_widget.show()
 
     def search_clicked(self):
@@ -393,43 +408,116 @@ class mainWidget(QtWidgets.QWidget):
         
     def search_finished(self):
         self.status_widget.close()
-        self.data = self.search_thread.data
-        # Add additional information
-        self.data['pyctd_plot_map'] = [[]] * len(self.data['files']) # Plotting information
-        self.data['pyctd_transect'] = [None] * len(self.data['files']) # transect information
+        data = self.search_thread.data
+        self.data = self.compare_and_merge_data(self.data,data)
+        if(self.FLAG_REL_PATH):
+            for i,c in enumerate(self.data['info_dict']):
+                fname = c['file']
+                fname = fname.replace(self.foldername,'.') # TODO, check if filesep is needed for windows
+                self.data['info_dict'][i]['file'] = fname
+
+        self.create_table()
+        self.update_table()
+
+    def compare_and_merge_data(self, data, data_new, new_station=True, new_comment=True):
+        """ Checks in data field if new data is already there, if not it adds it, otherwise it rejects it, it also add pyctd specific data fields, if they not already exist
+        """
+        
         try:
-            cnt = len(self.data['files'])
+            data_new['pyctd_plot_map']
+        except:
+            data_new['pyctd_plot_map'] = [[]] * len(data_new['info_dict']) # Plotting information
+
+        try:
+            data_new['pyctd_station']
+        except:
+            data_new['pyctd_station'] = [None] * len(data_new['info_dict']) # station information
+            
+        try:
+            data_new['pyctd_comment']
+        except:
+            data_new['pyctd_comment'] = [None] * len(data_new['info_dict']) # station information
+            
+        # Check if we have data at all
+        try:
+            data['info_dict']
+        except:
+            return data_new
+        
+        for i_new,c_new in enumerate(data_new['info_dict']):
+            FLAG_SAME = False
+            for i,c in enumerate(data['info_dict']):
+                if c['sha1'] == c_new['sha1']: # Same file
+                    FLAG_SAME = True
+                    if(new_station):
+                        if(data_new['pyctd_station'][i_new] is not None):
+                            data['pyctd_station'][i] = data_new['pyctd_station'][i_new]
+                            
+                    if(new_comment):
+                        if(data_new['pyctd_comment'][i_new] is not None):
+                            data['pyctd_comment'][i] = data_new['pyctd_comment'][i_new]
+
+                    break
+                
+            if(FLAG_SAME == False):
+                data['info_dict'].append(data_new['info_dict'][i_new])
+                data['pyctd_plot_map'].append(data_new['pyctd_plot_map'][i_new])                
+                data['pyctd_station'].append(data_new['pyctd_station'][i_new])
+                data['pyctd_comment'].append(data_new['pyctd_comment'][i_new])
+
+
+        return data
+        
+        
+    def create_table(self):
+        # Add additional information (if its not there already)
+
+            
+        try:
+            cnt = len(self.data['info_dict'])
         except:
             cnt = 0
-        for i in range(cnt):
+
+        nrows = self.file_table.rowCount()
+        n_new_rows = cnt - nrows
+        for i in range(n_new_rows):
             self.file_table.insertRow(i)
             
-        self.update_table()
 
     def update_table(self):        
         # Fill the table
         try:
-            cnt = len(self.data['files'])
+            cnt = len(self.data['info_dict'])
         except:
             cnt = 0
         for i in range(cnt):
-            date = self.data['dates'][i]
+            date = self.data['info_dict'][i]['date']
             self.file_table.setItem(i,0, QtWidgets.QTableWidgetItem( date.strftime('%Y-%m-%d %H:%M:%S' )))
-            lon = self.data['lon'][i]
+            lon = self.data['info_dict'][i]['lon']
             self.file_table.setItem(i,1, QtWidgets.QTableWidgetItem( "{:6.3f}".format(lon)))
-            lat = self.data['lat'][i]
+            lat = self.data['info_dict'][i]['lat']
             self.file_table.setItem(i,2, QtWidgets.QTableWidgetItem( "{:6.3f}".format(lat)))
-            tran = self.data['pyctd_transect'][i]
-            if(tran is not None):
-                self.file_table.setItem(i,3, QtWidgets.QTableWidgetItem( str(tran) ))
+            stat = self.data['pyctd_station'][i]
+            if(stat is not None):
+                self.file_table.setItem(i,3, QtWidgets.QTableWidgetItem( str(stat) ))
             else:
                 self.file_table.setItem(i,3, QtWidgets.QTableWidgetItem( str('') ))
+
+            # Comment
+            comstr  = self.data['pyctd_comment'][i]                   
+            if(comstr is None):
+                comstr = ''
+
+            comitem = QtWidgets.QTableWidgetItem( comstr )
+            comitem.setFlags(QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
+            self.file_table.setItem(i,4,comitem)
                 
-            fname = self.data['files'][i]
+            fname = self.data['info_dict'][i]['file']
             self.file_table.setItem(i,self._ncolumns-1, QtWidgets.QTableWidgetItem( fname ))
 
         # Resize the columns
-        self.file_table.resizeColumnsToContents()        
+        self.file_table.resizeColumnsToContents()
+        
 
     def status_function(self,call_object,i,nf,f):
         if(i == 0):
@@ -446,36 +534,61 @@ class mainWidget(QtWidgets.QWidget):
         """
 
         cwd = os.getcwd()
-        FLAG_REL_PATH = True
         filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for yaml summary","","YAML File (*.yaml);;All Files (*)")
         if 'yaml' in extension and ('.yaml' not in filename):
             filename += '.yaml'
             
-        print('filename',filename,extension)
         yaml_dict = {}
+        try:
+            self.data['info_dict']
+        except:
+            return
         # Add cruise information
         try:
             yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']
         except Exception as e:
-            msg = QtWidgets.QMessageBox()
-            msg.setIcon(QtWidgets.QMessageBox.Warning)
-            msg.setInformativeText('You did not define a cruise ID, you want to continue? TODO, let the user define a cruise ID and/or cancel this ...')
-            retval = msg.exec_()
-            print(retval)
+            def diag_clicked_ok():
+                self._cruise_fields['Cruise ID'] = str(cruise.text())
+                yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']                
+                self._diag_cruise.close()
+            def diag_clicked_cancel():
+                self._diag_cruise.close()
+                
+            diag = QtWidgets.QDialog()
+            layout = QtWidgets.QVBoxLayout(diag)
+            buttons = QtWidgets.QDialogButtonBox( QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+                                                  QtCore.Qt.Horizontal, diag)
+            buttons.accepted.connect(diag_clicked_ok)
+            buttons.rejected.connect(diag_clicked_cancel)
+            cruise_label = QtWidgets.QLabel('You did not define a cruise ID.\n If you want to do it now,\n enter it below and press "ok"')            
+            cruise = QtWidgets.QLineEdit(diag)
+            layout.addWidget(cruise_label)
+            layout.addWidget(cruise)            
+            layout.addWidget(buttons)
+            self._diag_cruise = diag
+            retval = diag.exec_()
 
             
         yaml_dict['created'] = str(datetime.datetime.now(pytz.utc))
         yaml_dict['version'] = version
-        
-        yaml_dict['casts'] = self.data['info_dict']
+        yaml_dict['casts']   = copy.deepcopy(self.data['info_dict'])
         # Convert datetime objects into something readable
         for i,d in enumerate(yaml_dict['casts']):
             yaml_dict['casts'][i]['date'] = str(d['date'])
-            if(FLAG_REL_PATH):
+            if(self.data['pyctd_station'][i] is not None):
+                yaml_dict['casts'][i]['station'] = self.data['pyctd_station'][i]
+            else:
+                yaml_dict['casts'][i]['station'] = ''
+
+            if(self.data['pyctd_comment'][i] is not None):
+                yaml_dict['casts'][i]['comment'] = self.data['pyctd_comment'][i]
+            else:
+                yaml_dict['casts'][i]['comment'] = ''                
+                
+            if(self.FLAG_REL_PATH):
                 fname = yaml_dict['casts'][i]['file']
                 fname = fname.replace(self.foldername,'.') # TODO, check if filesep is needed for windows
                 yaml_dict['casts'][i]['file'] = fname
-                print(self.foldername,fname)
 
         create_yaml_summary(yaml_dict,filename)
 
@@ -502,23 +615,83 @@ class mainWidget(QtWidgets.QWidget):
 
         
         create_yaml_summary(yaml_dict,filename)
-
+        
+        
     def load_summary(self):
-        print('Load summary')
+        filename_all,extension  = QtWidgets.QFileDialog.getOpenFileName(self,"Choose existing summary file","","YAML File (*.yaml);;All Files (*)")
+        filename                =  os.path.basename(filename_all) # Get the filename
+        dirname                 =  os.path.dirname(filename_all)  # Get the path
+        if(len(filename_all) == 0):
+            return
+        
+        # Opening the yaml file
+        try:
+            stream = open(filename_all, 'r')
+            data_yaml = yaml.load(stream)
+        except Exception as e:
+            # TODO warning message, bad data
+            msg = QtWidgets.QMessageBox()
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setInformativeText('No valid or not existing yaml file')
+            retval = msg.exec_()            
+            return
 
+        data = {}
+        data['pyctd_station']   = []
+        data['pyctd_comment']   = []
+        # Fill the data structure again
+        data['info_dict'] = data_yaml['casts']        
+        for i,c in enumerate(data['info_dict']):
+            # Fill in pyctd specific stuff
+            try:
+                data['pyctd_station'].append(c['station'])
+            except Exception as e:
+                data['pyctd_station'].append(None)
+
+            try:
+                data['pyctd_comment'].append(c['comment'])
+            except Exception as e:
+                data['pyctd_comment'].append(None)                
+                
+            date = datetime.datetime.strptime(c['date'],'%Y-%m-%d %H:%M:%S%z')
+            data['info_dict'][i]['date'] = date
+
+            
+        self.data = self.compare_and_merge_data(self.data,data)        
+        self.create_table()        
+        self.update_table()
+
+        
     def cruise_information(self):
-        print('Cruise information')
-
         # Check if we have a cruise fields, otherwise create one
         try:
             self._cruise_fields['Cruise name']
         except:
             self._cruise_fields['Cruise name'] = ''
-            self._cruise_fields['Cruise ID'] = ''            
+        try:            
+            self._cruise_fields['Cruise ID']
+        except:
+            self._cruise_fields['Cruise ID'] = ''
+        try:
+            self._cruise_fields['Ship name']
+        except:
             self._cruise_fields['Ship name'] = ''
+        try:
+            self._cruise_fields['Ship callsign']
+        except:            
             self._cruise_fields['Ship callsign'] = ''
-            self._cruise_fields['Project'] = ''            
+        try:
+            self._cruise_fields['Project']
+        except:            
+            self._cruise_fields['Project'] = ''
+        try:
+            self._cruise_fields['Principal investigator']            
+        except:            
             self._cruise_fields['Principal investigator'] = ''
+        try:
+            self._cruise_dialogs
+        except Exception as e:
+            print(str(e))
             self._cruise_dialogs = {}
             self.cruise_widget = QtWidgets.QWidget()
             cruise_layout = QtWidgets.QGridLayout(self.cruise_widget)            
@@ -534,12 +707,15 @@ class mainWidget(QtWidgets.QWidget):
             button_cancel.clicked.connect(self._cruise_cancel)
             cruise_layout.addWidget(button_apply,i+1,0)
             cruise_layout.addWidget(button_cancel,i+1,1)
+
+            
+        for i,f in enumerate(self._cruise_fields.keys()):
+            self._cruise_dialogs[f].setText(self._cruise_fields[f])            
             
         self.cruise_widget.show()
 
     def _cruise_apply(self):
         for i,f in enumerate(self._cruise_dialogs.keys()):
-            print(self._cruise_dialogs[f].text())
             self._cruise_fields[f] = str(self._cruise_dialogs[f].text())
         
     def _cruise_cancel(self):
@@ -553,19 +729,28 @@ class pyctdMainWindow(QtWidgets.QMainWindow):
         QtWidgets.QMainWindow.__init__(self)
         mainMenu = self.menuBar()
         self.setWindowTitle("pyctd")
+        self.mainwidget = mainWidget()
+        self.setCentralWidget(self.mainwidget)
+        
         quitAction = QtWidgets.QAction("&Quit", self)
         quitAction.setShortcut("Ctrl+Q")
         quitAction.setStatusTip('Closing the program')
         quitAction.triggered.connect(self.close_application)
-
-
+        sumlAction = QtWidgets.QAction("&Load summary", self)
+        sumlAction.setShortcut("Ctrl+O")
+        sumlAction.triggered.connect(self.mainwidget.load_summary)
+        sumcastAction = QtWidgets.QAction("&Create cast summary", self)
+        sumcastAction.triggered.connect(self.mainwidget.create_cast_summary)
+        sumcastAction.setShortcut("Ctrl+S")
+        sumcruiseAction = QtWidgets.QAction("&Create cruise summary", self)
+        sumcruiseAction.triggered.connect(self.mainwidget.create_cruise_summary)                        
 
         fileMenu = mainMenu.addMenu('&File')
+        fileMenu.addAction(sumlAction)
+        fileMenu.addAction(sumcastAction)
+        fileMenu.addAction(sumcruiseAction)        
         fileMenu.addAction(quitAction)
         #fileMenu.addAction(chooseStreamAction)
-
-        self.mainwidget = mainWidget()
-        self.setCentralWidget(self.mainwidget)
 
         searchMenu = mainMenu.addMenu('&Search')
         searchoptsAction = QtWidgets.QAction("&Search options", self)
@@ -584,16 +769,9 @@ class pyctdMainWindow(QtWidgets.QMainWindow):
         plotMenu.addAction(plotmapoptAction)
 
 
-        sumMenu = mainMenu.addMenu('&Dataset')
-        sumcruiseAction = QtWidgets.QAction("&Create cruise summary", self)
-        sumcruiseAction.triggered.connect(self.mainwidget.create_cruise_summary)                
-        sumcastAction = QtWidgets.QAction("&Create cast summary", self)
-        sumcastAction.triggered.connect(self.mainwidget.create_cast_summary)        
-        sumlAction = QtWidgets.QAction("&Load summary", self)
-        sumlAction.triggered.connect(self.mainwidget.load_summary)
-        sumMenu.addAction(sumcruiseAction)
-        sumMenu.addAction(sumcastAction)
-        sumMenu.addAction(sumlAction)
+
+
+
 
 
         cruiseMenu = mainMenu.addMenu('&Cruise')
@@ -601,11 +779,9 @@ class pyctdMainWindow(QtWidgets.QMainWindow):
         cruiseAction.setShortcut("Ctrl+I")        
         cruiseAction.triggered.connect(self.mainwidget.cruise_information)
         cruiseMenu.addAction(cruiseAction)                
-        tranAction = QtWidgets.QAction("&Create Station/Transect", self)
-        cruiseMenu.addAction(tranAction)        
+        statAction = QtWidgets.QAction("&Create Station", self)
+        cruiseMenu.addAction(statAction)        
 
-        
-        
         self.statusBar()
 
     def close_application(self):
@@ -616,6 +792,9 @@ class pyctdMainWindow(QtWidgets.QMainWindow):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     window = pyctdMainWindow()
+    w = 1000
+    h = 600
+    window.resize(w, h)
     window.show()
     sys.exit(app.exec_())
 

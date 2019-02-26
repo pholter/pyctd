@@ -92,7 +92,8 @@ class pymrd():
         sensor_str = []
         for i in range(17,len(hs)-1):
             sensor_str.append(hs[i])
-            if(hs[i].find('107') >=0):
+            #if(hs[i].find('107') >=0):
+            if(hs[i].find('COUNT') >=0):
                 mss = hs[i].split(' ')[1]
 
         self.cruise = cruise
