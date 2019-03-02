@@ -27,6 +27,7 @@ except:
 
 # For the map plotting
 import pylab as pl
+import cartopy
 import cartopy.crs as ccrs
 from cartopy.io import shapereader
 from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER    
@@ -143,21 +144,29 @@ class mainWidget(QtWidgets.QWidget):
         self.file_table.plot_signal.connect(self.plot_signal) # Custom signal for plotting
         self.file_table.station_signal.connect(self.station_signal) # Custom signal for adding casts to station
         self.file_table.cellChanged.connect(self.table_changed)
-        self._ncolumns = 6
-        self.columns = {}
+
+        self.columns            = {}
         self.columns['date']    = 0
         self.columns['lon']     = 1
         self.columns['lat']     = 2
         self.columns['station'] = 3
         self.columns['comment'] = 4
         self.columns['file']    = 5
+        self.columns['map']     = 6
+        self._ncolumns = len(self.columns.keys())      
         # TODO, create column names according to the data structures
         self.file_table.setColumnCount(self._ncolumns)
-        self.file_table.setHorizontalHeaderLabels("Date;Lon;Lat;Station;Comment;File".split(";"))
+
+        header_labels = [None]*self._ncolumns
+        for key in self.columns.keys():
+            ind = self.columns[key]
+            header_labels[ind] = key[0].upper() + key[1:]
+
+        self.file_table.setHorizontalHeaderLabels(header_labels)            
         for i in range(self._ncolumns):
             self.file_table.horizontalHeaderItem(i).setTextAlignment(QtCore.Qt.AlignHCenter)
             
-        self.file_table.horizontalHeader().setStretchLastSection(True)
+        #self.file_table.horizontalHeader().setStretchLastSection(True)
         self.file_table.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
 
         self.layout = QtWidgets.QGridLayout(self)
@@ -281,6 +290,7 @@ class mainWidget(QtWidgets.QWidget):
         ax.set_extent([FIG_LON[0], FIG_LON[1], FIG_LAT[0], FIG_LAT[1]])
         #ax.coastlines()
         ax.coastlines('10m')
+        ax.add_feature(cartopy.feature.OCEAN, zorder=0)
 
         #ax.draw()
         self.figwidget.show()
@@ -333,6 +343,10 @@ class mainWidget(QtWidgets.QWidget):
             lon = self.data['info_dict'][row]['lon']
             lat = self.data['info_dict'][row]['lat']
             self.data['pyctd_plot_map'][row].append(self.axes.plot(lon,lat,'o',transform=ccrs.PlateCarree()))
+            item = QtWidgets.QTableWidgetItem( 'Plot' )
+            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
+            item.setBackground(QtGui.QColor(100,100,150))
+            self.file_table.setItem(row,self.columns['map'], item)            
 
         self.canvas.draw()
         
@@ -344,6 +358,9 @@ class mainWidget(QtWidgets.QWidget):
             return
             
         for row in rows:
+            item = QtWidgets.QTableWidgetItem('')
+            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
+            self.file_table.setItem(row,self.columns['map'], item)                        
             while self.data['pyctd_plot_map'][row]:
                 tmpdata = self.data['pyctd_plot_map'][row].pop()
                 for line in tmpdata:
@@ -491,17 +508,28 @@ class mainWidget(QtWidgets.QWidget):
         except:
             cnt = 0
         for i in range(cnt):
+            # Add date
             date = self.data['info_dict'][i]['date']
-            self.file_table.setItem(i,0, QtWidgets.QTableWidgetItem( date.strftime('%Y-%m-%d %H:%M:%S' )))
+            item = QtWidgets.QTableWidgetItem( date.strftime('%Y-%m-%d %H:%M:%S' ))
+            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
+            self.file_table.setItem(i,self.columns['date'], item)
+            
             lon = self.data['info_dict'][i]['lon']
-            self.file_table.setItem(i,1, QtWidgets.QTableWidgetItem( "{:6.3f}".format(lon)))
+            item = QtWidgets.QTableWidgetItem( "{:6.3f}".format(lon))
+            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable            
+            self.file_table.setItem(i,self.columns['lon'], item)
             lat = self.data['info_dict'][i]['lat']
-            self.file_table.setItem(i,2, QtWidgets.QTableWidgetItem( "{:6.3f}".format(lat)))
+            item = QtWidgets.QTableWidgetItem( "{:6.3f}".format(lat))
+            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
+            self.file_table.setItem(i,self.columns['lat'], item)
             stat = self.data['pyctd_station'][i]
             if(stat is not None):
-                self.file_table.setItem(i,3, QtWidgets.QTableWidgetItem( str(stat) ))
+                item = QtWidgets.QTableWidgetItem( str(stat) )
             else:
-                self.file_table.setItem(i,3, QtWidgets.QTableWidgetItem( str('') ))
+                item = QtWidgets.QTableWidgetItem( str('') )
+
+            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable                
+            self.file_table.setItem(i,self.columns['station'], item)                
 
             # Comment
             comstr  = self.data['pyctd_comment'][i]                   
@@ -510,10 +538,12 @@ class mainWidget(QtWidgets.QWidget):
 
             comitem = QtWidgets.QTableWidgetItem( comstr )
             comitem.setFlags(QtCore.Qt.ItemIsEditable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
-            self.file_table.setItem(i,4,comitem)
+            self.file_table.setItem(i,self.columns['comment'],comitem)
                 
             fname = self.data['info_dict'][i]['file']
-            self.file_table.setItem(i,self._ncolumns-1, QtWidgets.QTableWidgetItem( fname ))
+            item = QtWidgets.QTableWidgetItem( fname )
+            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
+            self.file_table.setItem(i,self.columns['file'], item)
 
         # Resize the columns
         self.file_table.resizeColumnsToContents()
@@ -767,10 +797,6 @@ class pyctdMainWindow(QtWidgets.QMainWindow):
         plotmapoptAction.setStatusTip('Map plotting options')
         plotmapoptAction.triggered.connect(self.mainwidget.plot_map_opts)        
         plotMenu.addAction(plotmapoptAction)
-
-
-
-
 
 
 
