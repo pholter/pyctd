@@ -1,5 +1,5 @@
 import pkg_resources
-from .seabird.pycnv import pycnv
+import pycnv
 
 # Get the version
 version_file = pkg_resources.resource_filename('pyctd','VERSION')

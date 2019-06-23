@@ -1,5 +1,4 @@
-from ..seabird import pycnv as pycnv
-from ..seabird import pycnv_sum_folder as pycnv_sum_folder
+from pycnv import pycnv, pycnv_sum_folder
 from ..sst import pymrd as pymrd
 from ..sst import pymrd_sum_folder as pymrd_sum_folder
 import sys
@@ -42,6 +41,13 @@ def create_yaml_summary(summary,filename):
     print('Create yaml summary in file:' + filename)
     with open(filename, 'w') as outfile:
         yaml.dump(summary, outfile, default_flow_style=False)
+
+
+def create_csv_summary(summary,filename,order=None,):
+    """ Creates a csv summary
+    """
+    print('Create csv summary in file:' + filename)
+    pass
 
 
 class get_valid_files(QtCore.QThread):
@@ -145,14 +151,15 @@ class mainWidget(QtWidgets.QWidget):
         self.file_table.station_signal.connect(self.station_signal) # Custom signal for adding casts to station
         self.file_table.cellChanged.connect(self.table_changed)
 
-        self.columns            = {}
-        self.columns['date']    = 0
-        self.columns['lon']     = 1
-        self.columns['lat']     = 2
-        self.columns['station'] = 3
-        self.columns['comment'] = 4
-        self.columns['file']    = 5
-        self.columns['map']     = 6
+        self.columns                     = {}
+        self.columns['date']             = 0
+        self.columns['lon']              = 1
+        self.columns['lat']              = 2
+        self.columns['station (File)']   = 3
+        self.columns['station (Custom)'] = 4
+        self.columns['comment']          = 5
+        self.columns['file']             = 6
+        self.columns['map']              = 7
         self._ncolumns = len(self.columns.keys())      
         # TODO, create column names according to the data structures
         self.file_table.setColumnCount(self._ncolumns)
@@ -214,6 +221,9 @@ class mainWidget(QtWidgets.QWidget):
         layout.addWidget(button_cancel,2,1)        
         self._station_widget.hide()
 
+        # Map plotting settings
+        self._map_settings = {'res':'110m'}
+
 
     def table_changed(self,row,column):
         """ If a comment was added, add it to the comment list and update the data dictionary
@@ -257,8 +267,43 @@ class mainWidget(QtWidgets.QWidget):
 
         
     def plot_map_opts(self):
-        print('Plot map options')        
+        print('Plot map options')
+        self._map_options_widget = QtWidgets.QWidget()
+        self._map_options_widget.setWindowTitle('pyctd map options')
 
+        layout = QtWidgets.QGridLayout(self._map_options_widget)
+
+        self._map_options_res_combo = QtWidgets.QComboBox()
+        self._map_options_res_combo.addItem('110m')
+        self._map_options_res_combo.addItem('50m')
+        self._map_options_res_combo.addItem('10m')        
+        index = self._map_options_res_combo.findText(self._map_settings['res'], QtCore.Qt.MatchFixedString)
+        if index >= 0:
+            self._map_options_res_combo.setCurrentIndex(index)
+
+        self._map_options_change_button = QtWidgets.QPushButton('Change')
+        self._map_options_change_button.clicked.connect(self.plot_change_settings)
+        layout.addWidget(QtWidgets.QLabel('Coastline resolution'),0,0)
+        layout.addWidget(self._map_options_res_combo,1,0)
+        layout.addWidget(self._map_options_change_button,2,1)
+
+        self._map_options_widget.show()
+
+    def plot_change_settings(self):
+        print('Changing settings')
+        self._map_settings['res'] = self._map_options_res_combo.currentText()
+        print(self._map_settings['res'])
+        #self._map_settings =
+        self._map_zoom_x = self.axes.get_xlim()
+        self._map_zoom_y = self.axes.get_ylim()
+        # Plotting the map
+        try:
+            self.figwidget.close()
+        except:
+            pass
+        
+        self.plot_map()
+        
     def plot_map(self):
         #try:
         #    self.data['lon']
@@ -271,8 +316,13 @@ class mainWidget(QtWidgets.QWidget):
         FIG_LAT = [-89,90]
         #FIG_LON = [0,180]
         #FIG_LAT = [0,70]
-
         #self.fig       = Figure((5.0, 4.0), dpi=self.dpi)
+        try:
+            self.figwidget
+            NEW_FIGURE=False
+        except:
+            NEW_FIGURE=True
+            
         self.fig       = Figure(dpi=self.dpi)
         self.figwidget = QtWidgets.QWidget()
         self.figwidget.setWindowTitle('pyctd map')
@@ -287,9 +337,17 @@ class mainWidget(QtWidgets.QWidget):
         #self.figs.append(fig)
         self.axes      = self.fig.add_subplot(111,projection=ccrs.Mercator())
         ax             = self.axes
-        ax.set_extent([FIG_LON[0], FIG_LON[1], FIG_LAT[0], FIG_LAT[1]])
+        try:
+            print('Setting xlim',self._map_zoom_x,self._map_zoom_y)
+            self.axes.set_xlim(self._map_zoom_x)
+            self.axes.set_ylim(self._map_zoom_y)
+        except Exception as e:
+            print(e)
+            ax.set_extent([FIG_LON[0], FIG_LON[1], FIG_LAT[0], FIG_LAT[1]])
+
+
         #ax.coastlines()
-        ax.coastlines('10m')
+        ax.coastlines(self._map_settings['res'])
         ax.add_feature(cartopy.feature.OCEAN, zorder=0)
 
         #ax.draw()
@@ -340,15 +398,30 @@ class mainWidget(QtWidgets.QWidget):
             self.plot_map()
             
         for row in rows:
-            lon = self.data['info_dict'][row]['lon']
-            lat = self.data['info_dict'][row]['lat']
-            self.data['pyctd_plot_map'][row].append(self.axes.plot(lon,lat,'o',transform=ccrs.PlateCarree()))
+            color = (0,0,0) # Black
+            self.draw_to_map(row,color)
+            # Add an item to the table, which is used to change properties
             item = QtWidgets.QTableWidgetItem( 'Plot' )
             item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
-            item.setBackground(QtGui.QColor(100,100,150))
+            item.setBackground(QtGui.QColor(color[0],color[1],color[2]))
             self.file_table.setItem(row,self.columns['map'], item)            
 
         self.canvas.draw()
+        
+    def draw_to_map(self,row,color):
+        lon = self.data['info_dict'][row]['lon']
+        lat = self.data['info_dict'][row]['lat']
+        # If we already have a dataset
+        if (len(self.data['pyctd_plot_map'][row]) > 0):
+            #print('Changing plot properties, removing the old one')
+            tmpdata = self.data['pyctd_plot_map'][row].pop()
+            for line in tmpdata:
+                line.remove()            
+
+
+        line = self.axes.plot(lon,lat,'o',color=color,transform=ccrs.PlateCarree())
+        self.data['pyctd_plot_map'][row].append(line)                
+
         
     def rem_positions_from_map(self,rows):
         # Check if we have a map, if not call plot_map to create one
@@ -443,7 +516,7 @@ class mainWidget(QtWidgets.QWidget):
         try:
             data_new['pyctd_plot_map']
         except:
-            data_new['pyctd_plot_map'] = [[]] * len(data_new['info_dict']) # Plotting information
+            data_new['pyctd_plot_map'] = [[] for i in range(len(data_new['info_dict'])) ] # Plotting information
 
         try:
             data_new['pyctd_station']
@@ -522,6 +595,16 @@ class mainWidget(QtWidgets.QWidget):
             item = QtWidgets.QTableWidgetItem( "{:6.3f}".format(lat))
             item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
             self.file_table.setItem(i,self.columns['lat'], item)
+            # Station as in the file
+            try:
+                stat = self.data['info_dict'][i]['station']
+            except:
+                stat = ''
+                
+            item = QtWidgets.QTableWidgetItem(stat)
+            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
+            self.file_table.setItem(i,self.columns['station (File)'], item)
+            # Custom station as defined in pyctd
             stat = self.data['pyctd_station'][i]
             if(stat is not None):
                 item = QtWidgets.QTableWidgetItem( str(stat) )
@@ -529,7 +612,7 @@ class mainWidget(QtWidgets.QWidget):
                 item = QtWidgets.QTableWidgetItem( str('') )
 
             item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable                
-            self.file_table.setItem(i,self.columns['station'], item)                
+            self.file_table.setItem(i,self.columns['station (Custom)'], item)                
 
             # Comment
             comstr  = self.data['pyctd_comment'][i]                   
@@ -606,9 +689,9 @@ class mainWidget(QtWidgets.QWidget):
         for i,d in enumerate(yaml_dict['casts']):
             yaml_dict['casts'][i]['date'] = str(d['date'])
             if(self.data['pyctd_station'][i] is not None):
-                yaml_dict['casts'][i]['station'] = self.data['pyctd_station'][i]
+                yaml_dict['casts'][i]['station pyctd'] = self.data['pyctd_station'][i]
             else:
-                yaml_dict['casts'][i]['station'] = ''
+                yaml_dict['casts'][i]['station pyctd'] = ''
 
             if(self.data['pyctd_comment'][i] is not None):
                 yaml_dict['casts'][i]['comment'] = self.data['pyctd_comment'][i]
@@ -632,6 +715,7 @@ class mainWidget(QtWidgets.QWidget):
             retval = msg.exec_()
             return
 
+        yaml_dict = {}
         filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for yaml cruise summary","","YAML File (*.yaml);;All Files (*)")
         if 'yaml' in extension and ('.yaml' not in filename):
             filename += '.yaml'        
