@@ -43,12 +43,28 @@ def create_yaml_summary(summary,filename):
         yaml.dump(summary, outfile, default_flow_style=False)
 
 
-def create_csv_summary(summary,filename,order=None,):
+def create_csv_summary(summary,filename,order=['date','lon','lat','station','file','comment']):
     """ Creates a csv summary
     """
     print('Create csv summary in file:' + filename)
-    pass
+    print(summary)
+    outfile = open(filename, 'w')
+    csv_line = ''
+    for o in order:
+        csv_line += str(o) +','
 
+    csv_line = csv_line[:-2]
+    outfile.write(csv_line)
+    for i,d in enumerate(summary['casts']):
+        csv_line = ''
+        for o in order:
+            csv_line += str(d[o]) +','
+
+        csv_line = csv_line[:-2] + '\n'
+        outfile.write(csv_line)        
+        #print(csv_line)
+
+    outfile.close()
 
 class get_valid_files(QtCore.QThread):
     """ A thread to search a directory for valid files
@@ -647,9 +663,12 @@ class mainWidget(QtWidgets.QWidget):
         """
 
         cwd = os.getcwd()
-        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for yaml summary","","YAML File (*.yaml);;All Files (*)")
+        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for yaml summary","","YAML File (*.yaml);;CSV File (*.csv);;All Files (*)")
         if 'yaml' in extension and ('.yaml' not in filename):
             filename += '.yaml'
+
+        if 'csv' in extension and ('.csv' not in filename):
+            filename += '.csv'            
             
         yaml_dict = {}
         try:
@@ -703,7 +722,10 @@ class mainWidget(QtWidgets.QWidget):
                 fname = fname.replace(self.foldername,'.') # TODO, check if filesep is needed for windows
                 yaml_dict['casts'][i]['file'] = fname
 
-        create_yaml_summary(yaml_dict,filename)
+        if 'yaml' in extension:                
+            create_yaml_summary(yaml_dict,filename)                
+        elif 'csv' in extension:                
+            create_csv_summary(yaml_dict,filename)
 
     def create_cruise_summary(self):
         try:
