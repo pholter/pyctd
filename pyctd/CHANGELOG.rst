@@ -1,3 +1,6 @@
+0.4.0:
+        - outsourced pycnv
+	- Added tabs and station table
 0.3.9:
         - Moved the whole repo to pyctd, to have a combined too for CTD datasets, versioning and changelog will be kept
 0.3.8:

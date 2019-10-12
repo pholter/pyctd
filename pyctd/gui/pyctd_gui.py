@@ -12,6 +12,7 @@ import pkg_resources
 import datetime
 import pytz
 import copy
+import pkg_resources
 
 # Get the version
 version_file = pkg_resources.resource_filename('pyctd','VERSION')
@@ -34,6 +35,9 @@ import matplotlib
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+
+
+
 
 def create_yaml_summary(summary,filename):
     """ Creates a yaml summary
@@ -161,7 +165,11 @@ class mainWidget(QtWidgets.QWidget):
         self.search_button = QtWidgets.QPushButton('Search valid data')
         self.search_button.clicked.connect(self.search_clicked)
         self.clear_table_button = QtWidgets.QPushButton('Clear table')
-        self.clear_table_button.clicked.connect(self.clear_table_clicked)                        
+        self.clear_table_button.clicked.connect(self.clear_table_clicked)
+
+        # The table with the casts
+        self.file_table_widget = QtWidgets.QWidget() # The widget housing the file table and the clear button
+        self.file_table_widget_layout = QtWidgets.QVBoxLayout(self.file_table_widget)
         self.file_table = casttableWidget() # QtWidgets.QTableWidget()
         self.file_table.plot_signal.connect(self.plot_signal) # Custom signal for plotting
         self.file_table.station_signal.connect(self.station_signal) # Custom signal for adding casts to station
@@ -192,12 +200,22 @@ class mainWidget(QtWidgets.QWidget):
         #self.file_table.horizontalHeader().setStretchLastSection(True)
         self.file_table.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
 
+        self.file_table_widget_layout.addWidget(self.file_table)
+        self.file_table_widget_layout.addWidget(self.clear_table_button)
+
+        # Station table widget setup
+        self.setup_stations_widget()
+        
+        # Tabs
+        self.tabs = QtWidgets.QTabWidget()
+        self.tabs.addTab(self.file_table_widget,'Files')
+        self.tabs.addTab(self.stations['station_widget'],'Stations')        
         self.layout = QtWidgets.QGridLayout(self)
         self.layout.addWidget(self.folder_dialog,0,0)
         self.layout.addWidget(self.folder_button,0,1)
         self.layout.addWidget(self.search_button,1,0)
-        self.layout.addWidget(self.file_table,2,0,1,2)
-        self.layout.addWidget(self.clear_table_button,3,0)
+        self.layout.addWidget(self.tabs,2,0,1,2)
+        #self.layout.addWidget(,3,0)
 
 
         self.FLAG_REL_PATH = True
@@ -224,7 +242,7 @@ class mainWidget(QtWidgets.QWidget):
         layout.addWidget(self._new_station_edit,0,0)
         #layout.addWidget(QtWidgets.QLabel('Station/Station name'),0,0)
         button_add = QtWidgets.QPushButton('Add Station')
-        button_add.clicked.connect(self._station_add)
+        button_add.clicked.connect(self._station_add_to_cast)
         layout.addWidget(button_add,0,1)        
         self.station_combo = QtWidgets.QComboBox()
         self.station_combo.addItem('Remove')        
@@ -240,7 +258,45 @@ class mainWidget(QtWidgets.QWidget):
         # Map plotting settings
         self._map_settings = {'res':'110m'}
 
+    def setup_stations_widget(self):
+        self.stations = {}
+        self.stations['station_table']  = QtWidgets.QTableWidget()
+        self.stations['station_table'].cellChanged.connect(self._update_station_table)
+        station_columns                     = {}
+        station_columns['name']             = 0        
+        station_columns['lon']              = 1
+        station_columns['lat']              = 2
+        station_columns['description']      = 3
+        table = self.stations['station_table']
+        ncolumns = len(station_columns.keys())      
+        # TODO, create column names according to the data structures
+        table.setColumnCount(ncolumns)
 
+        header_labels = [None]*ncolumns
+        for key in station_columns.keys():
+            ind = station_columns[key]
+            header_labels[ind] = key[0].upper() + key[1:]
+
+        table.setHorizontalHeaderLabels(header_labels)            
+        for i in range(ncolumns):
+            table.horizontalHeaderItem(i).setTextAlignment(QtCore.Qt.AlignHCenter)
+
+        self.stations['station_table_nrows'] = 0            
+        self.stations['station_add_button'] = QtWidgets.QPushButton('Add')
+        self.stations['station_add_button'].clicked.connect(self._station_add_blank)
+        self.stations['station_rem_button'] = QtWidgets.QPushButton('Rem')
+        self.stations['station_rem_button'].clicked.connect(self._station_rem)        
+        self.stations['station_load_button'] = QtWidgets.QPushButton('Load')
+        self.stations['station_load_button'].clicked.connect(self.add_station_file)
+        self.stations['station_widget'] = QtWidgets.QWidget()
+        self.stations['station_layout'] = QtWidgets.QGridLayout(self.stations['station_widget'])
+        layout = self.stations['station_layout']
+        layout.addWidget(self.stations['station_table'],0,0,1,3)
+        layout.addWidget(self.stations['station_add_button'],1,0)
+        layout.addWidget(self.stations['station_rem_button'],1,1)
+        layout.addWidget(self.stations['station_load_button'],1,2)          
+
+            
     def table_changed(self,row,column):
         """ If a comment was added, add it to the comment list and update the data dictionary
         """
@@ -250,21 +306,60 @@ class mainWidget(QtWidgets.QWidget):
             # Resize the columns
             self.file_table.resizeColumnsToContents()
 
+    def _station_rem(self):
+        rows = sorted(set(index.row() for index in
+                          self.stations['station_table'].selectedIndexes()),reverse=True)
+        for row in rows:
+            print('Row %d is selected' % row)
+            self.stations['station_table'].removeRow(row)
+
+    def _update_station_table(self):
+        self.stations['station_table'].resizeColumnsToContents()
+        table = self.stations['station_table']
+        self.station_combo.clear()        
+        for row in range(table.rowCount()):
+            station_name = table.item(row,0).text()
+            #index = table.index(row, 0) # Station name
+            #data_str = str(table.data(index).toString())
+            self.station_combo.addItem(station_name)
+
+    def _station_add(self,name,lon,lat,comment='',update_table=True):
+        itemname = QtWidgets.QTableWidgetItem(name)
+        itemlon = QtWidgets.QTableWidgetItem(str(lon))
+        itemlat = QtWidgets.QTableWidgetItem(str(lat))
+        itemcomment = QtWidgets.QTableWidgetItem(comment)
+        self.stations['station_table'].insertRow(self.stations['station_table_nrows'])        
+        self.stations['station_table'].setItem(self.stations['station_table_nrows'],0, itemname)
+        self.stations['station_table'].setItem(self.stations['station_table_nrows'],1, itemlon)
+        self.stations['station_table'].setItem(self.stations['station_table_nrows'],2, itemlat)
+        self.stations['station_table'].setItem(self.stations['station_table_nrows'],3, itemcomment)        
+        self.stations['station_table_nrows'] += 1
+        if(update_table):
+            self._update_station_table()            
+
+    def _station_add_blank(self):    
+        item = QtWidgets.QTableWidgetItem('Station  ' + str(self.stations['station_table_nrows']))
+        self.stations['station_table'].insertRow(self.stations['station_table_nrows'])        
+        self.stations['station_table'].setItem(self.stations['station_table_nrows'],0, item)
+        self.stations['station_table_nrows'] += 1
+        #self.stations['station_table'].resizeColumnsToContents()
+        self._update_station_table()
         
-    def _station_add(self):
-        tran_name = self._new_station_edit.text()
-        FLAG_NEW = True
-        if(len(tran_name) > 0):
-            for count in range(self.station_combo.count()):
-                if(self.station_combo.itemText(count) == tran_name):
-                    FLAG_NEW = False
+    def _station_add_to_cast(self):                   
+        #self.data['pyctd_station'][i] = tran    
+        if True:
+            tran_name = self._new_station_edit.text()
+            FLAG_NEW = True
+            if(len(tran_name) > 0):
+                for count in range(self.station_combo.count()):
+                    if(self.station_combo.itemText(count) == tran_name):
+                        FLAG_NEW = False
 
-            if FLAG_NEW:
-                self.station_combo.addItem(tran_name)
-                cnt = self.station_combo.count()
-                self.station_combo.setCurrentIndex(cnt-1)
-
-
+                if FLAG_NEW:
+                    self.station_combo.addItem(tran_name)
+                    cnt = self.station_combo.count()
+                    self.station_combo.setCurrentIndex(cnt-1)
+                    
     def _station_apply(self):
         if True:
             for i in self._station_rows:
@@ -372,9 +467,24 @@ class mainWidget(QtWidgets.QWidget):
         
     def station_signal(self,rows):
         self._station_rows = rows
-        self._station_widget.show() # Open the widget and let it decide what to do with the choosen rows
+        #self._station_widget.show() # Open the widget and let it decide what to do with the choosen rows
+        #self.stations['station_table'].show()
+        table = self.stations['station_table']
+        self.station_combo.clear()
+        table_choose = QtWidgets.QTableWidget()
+        table_choose.setColumnCount(1)
+        table_choose.setHorizontalHeaderLabels(['Name'])                    
+        for row in range(table.rowCount()):
+            station_name = table.item(row,0).text()
+            item = QtWidgets.QTableWidgetItem( station_name )            
+            table_choose.insertRow(row)
+            table_choose.setItem(row,0,item)
 
+        table_choose.resizeColumnsToContents()
+        self.table_choose = table_choose            
+        table_choose.show()
 
+        
     def plot_signal(self,rows,command):
         if(command == 'add to map'):
             self.add_positions_to_map(rows)
@@ -460,6 +570,10 @@ class mainWidget(QtWidgets.QWidget):
         self.canvas.draw()
         
     def clear_table_clicked(self):
+        try:
+            self.data['files']
+        except:
+            return
         # Remove from plot
         for row in range(len(self.data['files'])):            
             while self.data['pyctd_plot_map'][row]:
@@ -856,6 +970,20 @@ class mainWidget(QtWidgets.QWidget):
         
     def _cruise_cancel(self):
         self.cruise_widget.hide()
+
+    def add_station_file(self, stations_file = None):
+        stations_file = pkg_resources.resource_filename('pycnv', 'stations/iow_stations.yaml')
+        f_stations = open(stations_file)
+        # use safe_load instead load
+        stations_yaml = yaml.safe_load(f_stations)
+        for i,station in enumerate(stations_yaml['stations']):
+            name = station['name']
+            lon  = station['longitude']
+            lat  = station['latitude']    
+            self._station_add(name,lon,lat,update_table=False)
+
+        self._update_station_table()            
+
         
         
 
