@@ -285,16 +285,21 @@ class mainWidget(QtWidgets.QWidget):
         self.stations['station_add_button'] = QtWidgets.QPushButton('Add')
         self.stations['station_add_button'].clicked.connect(self._station_add_blank)
         self.stations['station_rem_button'] = QtWidgets.QPushButton('Rem')
-        self.stations['station_rem_button'].clicked.connect(self._station_rem)        
+        self.stations['station_rem_button'].clicked.connect(self._station_rem)
+        self.stations['station_known_stations'] = QtWidgets.QComboBox()
+        # Populating the known stations, at the moment it is only IOW monitoring
+        self.stations['station_known_stations'].addItem('Station File')        
+        self.stations['station_known_stations'].addItem('IOW Monitoring')
         self.stations['station_load_button'] = QtWidgets.QPushButton('Load')
         self.stations['station_load_button'].clicked.connect(self.add_station_file)
         self.stations['station_widget'] = QtWidgets.QWidget()
         self.stations['station_layout'] = QtWidgets.QGridLayout(self.stations['station_widget'])
         layout = self.stations['station_layout']
-        layout.addWidget(self.stations['station_table'],0,0,1,3)
+        layout.addWidget(self.stations['station_table'],0,0,1,4)
         layout.addWidget(self.stations['station_add_button'],1,0)
         layout.addWidget(self.stations['station_rem_button'],1,1)
-        layout.addWidget(self.stations['station_load_button'],1,2)          
+        layout.addWidget(self.stations['station_known_stations'],1,2)
+        layout.addWidget(self.stations['station_load_button'],1,3)          
 
             
     def table_changed(self,row,column):
@@ -467,10 +472,11 @@ class mainWidget(QtWidgets.QWidget):
         
     def station_signal(self,rows):
         self._station_rows = rows
-        #self._station_widget.show() # Open the widget and let it decide what to do with the choosen rows
-        #self.stations['station_table'].show()
         table = self.stations['station_table']
         self.station_combo.clear()
+        self.choose_station = {}
+        self.choose_station['widget'] = QtWidgets.QWidget()
+        self.choose_station['layout'] = QtWidgets.QGridLayout(self.choose_station['widget'])
         table_choose = QtWidgets.QTableWidget()
         table_choose.setColumnCount(1)
         table_choose.setHorizontalHeaderLabels(['Name'])                    
@@ -481,8 +487,37 @@ class mainWidget(QtWidgets.QWidget):
             table_choose.setItem(row,0,item)
 
         table_choose.resizeColumnsToContents()
-        self.table_choose = table_choose            
-        table_choose.show()
+        self.choose_station['button_add'] = QtWidgets.QPushButton('add')
+        self.choose_station['button_add'].clicked.connect(self._table_choose_add_to_casts)
+        self.choose_station['layout'].addWidget(table_choose,0,0,1,2)
+        self.choose_station['layout'].addWidget(self.choose_station['button_add'],1,0)
+        self.choose_station['table'] = table_choose            
+        self.choose_station['widget'].show()
+
+    def _table_choose_add_to_casts(self):
+        print('Hallo!')
+        rows = sorted(set(index.row() for index in
+                          self.choose_station['table'].selectedIndexes()),reverse=False)
+
+        stations = ''
+        for row in rows:
+            print('Row %d is selected in choose table: ' % row)
+            station_name = self.choose_station['table'].item(row,0).text()
+            stations += station_name + ' ; '
+
+        stations = stations[:-3] # remove last ;
+        rows = sorted(set(index.row() for index in
+                          self.file_table.selectedIndexes()),reverse=True)
+
+
+        for row in rows:
+            print('Row %d is selected in station table: ' % row)
+            #item = QtWidgets.QTableWidgetItem( stations )
+            self.data['pyctd_station'][row] = stations                    
+            #self.file_table.setItem(row,self.columns['station (Custom)'], item)                        
+
+
+        self.update_table()
 
         
     def plot_signal(self,rows,command):
@@ -516,59 +551,6 @@ class mainWidget(QtWidgets.QWidget):
         #    ax.draw()
         self.cast_figwidget.show()
 
-    def add_positions_to_map(self,rows):
-        # Check if we have a map, if not call plot_map to create one
-        try:
-            self.axes
-        except:
-            self.plot_map()
-            
-        for row in rows:
-            color = (0,0,0) # Black
-            self.draw_to_map(row,color)
-            # Add an item to the table, which is used to change properties
-            item = QtWidgets.QTableWidgetItem( 'Plot' )
-            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
-            item.setBackground(QtGui.QColor(color[0],color[1],color[2]))
-            self.file_table.setItem(row,self.columns['map'], item)            
-
-        self.canvas.draw()
-        
-    def draw_to_map(self,row,color):
-        lon = self.data['info_dict'][row]['lon']
-        lat = self.data['info_dict'][row]['lat']
-        # If we already have a dataset
-        if (len(self.data['pyctd_plot_map'][row]) > 0):
-            #print('Changing plot properties, removing the old one')
-            tmpdata = self.data['pyctd_plot_map'][row].pop()
-            for line in tmpdata:
-                line.remove()            
-
-
-        line = self.axes.plot(lon,lat,'o',color=color,transform=ccrs.PlateCarree())
-        self.data['pyctd_plot_map'][row].append(line)                
-
-        
-    def rem_positions_from_map(self,rows):
-        # Check if we have a map, if not call plot_map to create one
-        try:
-            self.axes
-        except:
-            return
-            
-        for row in rows:
-            item = QtWidgets.QTableWidgetItem('')
-            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
-            self.file_table.setItem(row,self.columns['map'], item)                        
-            while self.data['pyctd_plot_map'][row]:
-                tmpdata = self.data['pyctd_plot_map'][row].pop()
-                for line in tmpdata:
-                    line.remove()
-                
-            #self.data['plot_map'][row].pop(0)[0].remove()
-
-        self.canvas.draw()
-        
     def clear_table_clicked(self):
         try:
             self.data['files']
@@ -972,8 +954,19 @@ class mainWidget(QtWidgets.QWidget):
         self.cruise_widget.hide()
 
     def add_station_file(self, stations_file = None):
-        stations_file = pkg_resources.resource_filename('pycnv', 'stations/iow_stations.yaml')
-        f_stations = open(stations_file)
+        combo_text = self.stations['station_known_stations'].currentText()
+        if('Station File' in combo_text):
+            files_types = "YAML (*.yml);; All (*)"
+            fchoosen = QtWidgets.QFileDialog.getOpenFileName(self, "Select Station File",'',files_types)
+            stations_file = fchoosen[0]
+        elif('IOW Monitoring' in combo_text):
+            stations_file = pkg_resources.resource_filename('pycnv', 'stations/iow_stations.yaml')
+
+        try:
+            f_stations = open(stations_file)
+        except Exception as e:
+            print('Could not open file:' + stations_file)
+            return
         # use safe_load instead load
         stations_yaml = yaml.safe_load(f_stations)
         for i,station in enumerate(stations_yaml['stations']):
