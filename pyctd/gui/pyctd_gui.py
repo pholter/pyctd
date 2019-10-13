@@ -13,6 +13,7 @@ import datetime
 import pytz
 import copy
 import pkg_resources
+import re
 
 # Get the version
 version_file = pkg_resources.resource_filename('pyctd','VERSION')
@@ -102,27 +103,43 @@ class get_valid_files(QtCore.QThread):
         self.search_status.emit(self,i,nf,f)
 
 
-class casttableWidget(QtWidgets.QTableWidget):
+class casttableWidget(QtWidgets.QTableWidget,):
     plot_signal = QtCore.pyqtSignal(object,str) # Create a custom signal for plotting
     station_signal = QtCore.pyqtSignal(object) # Create a custom signal for adding the cast to station
-    comment_signal = QtCore.pyqtSignal(object) # Create a custom signal for adding the cast to station    
-    def __init__(self):
+    remstation_signal = QtCore.pyqtSignal(object) # Create a custom signal for removing the cast to station    
+    comment_signal = QtCore.pyqtSignal(object) # Create a custom signal for adding the cast to station
+    
+    def __init__(self, within_qgis=False):
+        """ Changing the contextmenu if pyctd is used within qgis
+        """
+        self.within_qgis = within_qgis
         QtWidgets.QTableWidget.__init__(self)
 
     def contextMenuEvent(self, event):
         self.menu = QtWidgets.QMenu(self)
         plotAction = QtWidgets.QAction('Add to map', self)
         plotAction.triggered.connect(self.plot_map)
-        stationAction = QtWidgets.QAction('Add/Rem to Station', self)
+        stationAction = QtWidgets.QAction('Add to Station', self)
         stationAction.triggered.connect(self.station)
+        stationRemAction = QtWidgets.QAction('Rem from Station', self)
+        stationRemAction.triggered.connect(self.rem_station)        
         remplotAction = QtWidgets.QAction('Rem from map', self)
         remplotAction.triggered.connect(self.rem_from_map)
         plotcastAction = QtWidgets.QAction('Plot cast', self)
-        plotcastAction.triggered.connect(self.plot_cast)                
+        plotcastAction.triggered.connect(self.plot_cast)
+
+            
         self.menu.addAction(stationAction)
-        self.menu.addAction(plotAction)
-        self.menu.addAction(remplotAction)
-        self.menu.addAction(plotcastAction)        
+        self.menu.addAction(stationRemAction)        
+        #self.menu.addAction(plotAction)
+        #self.menu.addAction(remplotAction)
+        #self.menu.addAction(plotcastAction)
+
+        if self.within_qgis:
+            addlayerAction = QtWidgets.QAction('Add to layer', self)
+            addlayerAction.triggered.connect(self.plot_cast)
+            self.menu.addAction(addlayerAction)            
+            
         self.menu.popup(QtGui.QCursor.pos())
         self.menu.show()
         # Get selected rows (as information for plotting etc.)
@@ -138,6 +155,12 @@ class casttableWidget(QtWidgets.QTableWidget):
         """
         row_list = self.rows
         self.station_signal.emit(row_list) # Emit the signal with the row list and the command
+
+    def rem_station(self):
+        """ Signal for removing station
+        """
+        row_list = self.rows
+        self.remstation_signal.emit(row_list) # Emit the signal with the row list and the command        
 
     def plot_map(self):
         row_list = self.rows
@@ -155,7 +178,9 @@ class casttableWidget(QtWidgets.QTableWidget):
         
 
 class mainWidget(QtWidgets.QWidget):
-    def __init__(self,logging_level=logging.INFO):
+    def __init__(self,logging_level=logging.INFO,within_qgis = False):
+        self.within_qgis = within_qgis
+        print('Opened as a Qgis plugin')
         QtWidgets.QWidget.__init__(self)
         self.folder_dialog = QtWidgets.QLineEdit(self)
         self.folder_dialog.setText(os.getcwd()) # Take the local directory as a start
@@ -170,9 +195,10 @@ class mainWidget(QtWidgets.QWidget):
         # The table with the casts
         self.file_table_widget = QtWidgets.QWidget() # The widget housing the file table and the clear button
         self.file_table_widget_layout = QtWidgets.QVBoxLayout(self.file_table_widget)
-        self.file_table = casttableWidget() # QtWidgets.QTableWidget()
+        self.file_table = casttableWidget(within_qgis=self.within_qgis) # QtWidgets.QTableWidget()
         self.file_table.plot_signal.connect(self.plot_signal) # Custom signal for plotting
         self.file_table.station_signal.connect(self.station_signal) # Custom signal for adding casts to station
+        self.file_table.remstation_signal.connect(self.remstation_signal) # Custom signal for adding casts to station        
         self.file_table.cellChanged.connect(self.table_changed)
 
         self.columns                     = {}
@@ -469,6 +495,12 @@ class mainWidget(QtWidgets.QWidget):
         #ax.draw()
         self.figwidget.show()
 
+    def remstation_signal(self,rows):
+        print('Removing stations')
+        for row in rows:        
+            self.data['pyctd_station'][row] = None
+
+        self.update_table()
         
     def station_signal(self,rows):
         self._station_rows = rows
@@ -1013,18 +1045,6 @@ class pyctdMainWindow(QtWidgets.QMainWindow):
         searchoptsAction = QtWidgets.QAction("&Search options", self)
         searchoptsAction.triggered.connect(self.mainwidget.search_opts_clicked)
         searchMenu.addAction(searchoptsAction)        
-
-        plotMenu = mainMenu.addMenu('&Plot')
-        plotmapAction = QtWidgets.QAction("&Plot map", self)
-        plotmapAction.setShortcut("Ctrl+M")
-        plotmapAction.setStatusTip('Plot a map')
-        plotmapAction.triggered.connect(self.mainwidget.plot_map)        
-        plotMenu.addAction(plotmapAction)
-        plotmapoptAction = QtWidgets.QAction("&Plot map options", self)
-        plotmapoptAction.setStatusTip('Map plotting options')
-        plotmapoptAction.triggered.connect(self.mainwidget.plot_map_opts)        
-        plotMenu.addAction(plotmapoptAction)
-
 
 
         cruiseMenu = mainMenu.addMenu('&Cruise')
