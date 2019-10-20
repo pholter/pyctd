@@ -14,6 +14,7 @@ import pytz
 import copy
 import pkg_resources
 import re
+import numpy as np
 
 # Get the version
 version_file = pkg_resources.resource_filename('pyctd','VERSION')
@@ -106,7 +107,9 @@ class get_valid_files(QtCore.QThread):
 class casttableWidget(QtWidgets.QTableWidget,):
     plot_signal = QtCore.pyqtSignal(object,str) # Create a custom signal for plotting
     station_signal = QtCore.pyqtSignal(object) # Create a custom signal for adding the cast to station
-    remstation_signal = QtCore.pyqtSignal(object) # Create a custom signal for removing the cast to station    
+    remstation_signal = QtCore.pyqtSignal(object) # Create a custom signal for removing the cast to station
+    campaign_signal = QtCore.pyqtSignal(object) # Create a custom signal for adding the cast to campaign
+    remcampaign_signal = QtCore.pyqtSignal(object) # Create a custom signal for removing the cast to campaign
     comment_signal = QtCore.pyqtSignal(object) # Create a custom signal for adding the cast to station
     
     def __init__(self, within_qgis=False):
@@ -114,6 +117,8 @@ class casttableWidget(QtWidgets.QTableWidget,):
         """
         self.within_qgis = within_qgis
         QtWidgets.QTableWidget.__init__(self)
+        if self.within_qgis:
+            self.addlayerAction = QtWidgets.QAction('Add to layer', self)        
 
     def contextMenuEvent(self, event):
         self.menu = QtWidgets.QMenu(self)
@@ -122,7 +127,11 @@ class casttableWidget(QtWidgets.QTableWidget,):
         stationAction = QtWidgets.QAction('Add to Station', self)
         stationAction.triggered.connect(self.station)
         stationRemAction = QtWidgets.QAction('Rem from Station', self)
-        stationRemAction.triggered.connect(self.rem_station)        
+        stationRemAction.triggered.connect(self.rem_station)
+        campaignAction = QtWidgets.QAction('Add to Campaign', self)
+        campaignAction.triggered.connect(self.campaign)
+        campaignRemAction = QtWidgets.QAction('Rem from Campaign', self)
+        campaignRemAction.triggered.connect(self.rem_campaign)                
         remplotAction = QtWidgets.QAction('Rem from map', self)
         remplotAction.triggered.connect(self.rem_from_map)
         plotcastAction = QtWidgets.QAction('Plot cast', self)
@@ -130,15 +139,14 @@ class casttableWidget(QtWidgets.QTableWidget,):
 
             
         self.menu.addAction(stationAction)
-        self.menu.addAction(stationRemAction)        
+        self.menu.addAction(stationRemAction)
+        self.menu.addAction(campaignAction)
+        self.menu.addAction(campaignRemAction)                
         #self.menu.addAction(plotAction)
         #self.menu.addAction(remplotAction)
         #self.menu.addAction(plotcastAction)
-
         if self.within_qgis:
-            addlayerAction = QtWidgets.QAction('Add to layer', self)
-            addlayerAction.triggered.connect(self.plot_cast)
-            self.menu.addAction(addlayerAction)            
+            self.menu.addAction(self.addlayerAction)            
             
         self.menu.popup(QtGui.QCursor.pos())
         self.menu.show()
@@ -160,7 +168,19 @@ class casttableWidget(QtWidgets.QTableWidget,):
         """ Signal for removing station
         """
         row_list = self.rows
-        self.remstation_signal.emit(row_list) # Emit the signal with the row list and the command        
+        self.remstation_signal.emit(row_list) # Emit the signal with the row list and the command
+
+    def campaign(self):
+        """ Signal for campaign
+        """
+        row_list = self.rows
+        self.campaign_signal.emit(row_list) # Emit the signal with the row list and the command
+ 
+    def rem_campaign(self):
+        """ Signal for removing campaign
+        """
+        row_list = self.rows
+        self.remcampaign_signal.emit(row_list) # Emit the signal with the row list and the command                
 
     def plot_map(self):
         row_list = self.rows
@@ -180,14 +200,14 @@ class casttableWidget(QtWidgets.QTableWidget,):
 class mainWidget(QtWidgets.QWidget):
     def __init__(self,logging_level=logging.INFO,within_qgis = False):
         self.within_qgis = within_qgis
-        print('Opened as a Qgis plugin')
+            
         QtWidgets.QWidget.__init__(self)
         self.folder_dialog = QtWidgets.QLineEdit(self)
         self.folder_dialog.setText(os.getcwd()) # Take the local directory as a start
         self.foldername = os.getcwd()        
         self.folder_button = QtWidgets.QPushButton('Choose Datafolder')
         self.folder_button.clicked.connect(self.folder_clicked)
-        self.search_button = QtWidgets.QPushButton('Search valid data')
+        self.search_button = QtWidgets.QPushButton('Search for CTD files')
         self.search_button.clicked.connect(self.search_clicked)
         self.clear_table_button = QtWidgets.QPushButton('Clear table')
         self.clear_table_button.clicked.connect(self.clear_table_clicked)
@@ -198,18 +218,21 @@ class mainWidget(QtWidgets.QWidget):
         self.file_table = casttableWidget(within_qgis=self.within_qgis) # QtWidgets.QTableWidget()
         self.file_table.plot_signal.connect(self.plot_signal) # Custom signal for plotting
         self.file_table.station_signal.connect(self.station_signal) # Custom signal for adding casts to station
-        self.file_table.remstation_signal.connect(self.remstation_signal) # Custom signal for adding casts to station        
+        self.file_table.remstation_signal.connect(self.remstation_signal) # Custom signal for adding casts to station
+        self.file_table.campaign_signal.connect(self.campaign_signal) # Custom signal for adding casts to campaign
+        self.file_table.remcampaign_signal.connect(self.remcampaign_signal) # Custom signal for adding casts to campaign       
         self.file_table.cellChanged.connect(self.table_changed)
-
+        
         self.columns                     = {}
         self.columns['date']             = 0
         self.columns['lon']              = 1
         self.columns['lat']              = 2
         self.columns['station (File)']   = 3
         self.columns['station (Custom)'] = 4
-        self.columns['comment']          = 5
-        self.columns['file']             = 6
-        self.columns['map']              = 7
+        self.columns['campaign']         = 5
+        self.columns['comment']          = 6        
+        self.columns['file']             = 7
+        #self.columns['map']              = 8
         self._ncolumns = len(self.columns.keys())      
         # TODO, create column names according to the data structures
         self.file_table.setColumnCount(self._ncolumns)
@@ -231,11 +254,16 @@ class mainWidget(QtWidgets.QWidget):
 
         # Station table widget setup
         self.setup_stations_widget()
+        # Transect table widget setup
+        self.setup_transect_widget()
+        self.setup_campaign_widget()                
         
         # Tabs
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(self.file_table_widget,'Files')
-        self.tabs.addTab(self.stations['station_widget'],'Stations')        
+        self.tabs.addTab(self.stations['station_widget'],'Stations')
+        self.tabs.addTab(self.tran['widget'],'Transects')
+        self.tabs.addTab(self.camp['widget'],'Campaigns')
         self.layout = QtWidgets.QGridLayout(self)
         self.layout.addWidget(self.folder_dialog,0,0)
         self.layout.addWidget(self.folder_button,0,1)
@@ -284,6 +312,49 @@ class mainWidget(QtWidgets.QWidget):
         # Map plotting settings
         self._map_settings = {'res':'110m'}
 
+    def setup_campaign_widget(self):
+        self.camp = {}
+        self.camp['widget'] = QtWidgets.QWidget()        
+        self.camp['table']  = QtWidgets.QTableWidget()
+        table_columns                     = {}
+        table_columns['Name']             = 0        
+        table_columns['Ship name']        = 1        
+        table_columns['Ship callsign']    = 2
+        table_columns['Project']          = 3
+        table_columns['Contact (name)']   = 4        
+        table_columns['Contact (email)']  = 5
+        table = self.camp['table']
+        ncolumns = len(table_columns.keys())      
+        table.setColumnCount(ncolumns)
+        header_labels = [None] * ncolumns
+        for key in table_columns.keys():
+            ind = table_columns[key]
+            header_labels[ind] = key[0].upper() + key[1:]
+
+        table.setHorizontalHeaderLabels(header_labels)            
+        for i in range(ncolumns):
+            table.horizontalHeaderItem(i).setTextAlignment(QtCore.Qt.AlignHCenter)        
+        
+        self.camp['layout'] = QtWidgets.QGridLayout(self.camp['widget'])
+        self.camp['table_nrows'] = 0            
+        self.camp['add_button'] = QtWidgets.QPushButton('Add')
+        self.camp['add_button'].clicked.connect(self._campaign_add_blank)
+        self.camp['rem_button'] = QtWidgets.QPushButton('Rem')
+        self.camp['rem_button'].clicked.connect(self._campaign_rem)
+        self.camp['layout'].addWidget(self.camp['table'],0,0,1,2)
+        self.camp['layout'].addWidget(self.camp['add_button'],1,0)
+        self.camp['layout'].addWidget(self.camp['rem_button'],1,1)        
+        #self.tran['station_table'].cellChanged.connect(self._update_station_table)
+        self.camp['table'].resizeColumnsToContents()        
+
+    def setup_transect_widget(self):
+        self.tran = {}
+        self.tran['widget'] = QtWidgets.QWidget()        
+        self.tran['table']  = QtWidgets.QTableWidget()
+        self.tran['layout'] = QtWidgets.QGridLayout(self.tran['widget'])
+        self.tran['layout'].addWidget(self.tran['table'])
+        #self.tran['station_table'].cellChanged.connect(self._update_station_table)                
+
     def setup_stations_widget(self):
         self.stations = {}
         self.stations['station_table']  = QtWidgets.QTableWidget()
@@ -318,6 +389,14 @@ class mainWidget(QtWidgets.QWidget):
         self.stations['station_known_stations'].addItem('IOW Monitoring')
         self.stations['station_load_button'] = QtWidgets.QPushButton('Load')
         self.stations['station_load_button'].clicked.connect(self.add_station_file)
+        # Transect
+        self.stations['tran_add_button'] = QtWidgets.QPushButton('Add transect')
+        self.stations['tran_add_button'].clicked.connect(self.add_transect)
+        self.stations['tran_name_le'] = QtWidgets.QLineEdit('Transect name')
+        self.stations['tran_rem_button'] = QtWidgets.QPushButton('Rem transect')
+        self.stations['tran_rem_button'].clicked.connect(self.rem_transect)        
+        # Connect the table to functions
+        self.stations['station_table'].cellChanged.connect(self.station_table_cellchanged)
         self.stations['station_widget'] = QtWidgets.QWidget()
         self.stations['station_layout'] = QtWidgets.QGridLayout(self.stations['station_widget'])
         layout = self.stations['station_layout']
@@ -325,9 +404,126 @@ class mainWidget(QtWidgets.QWidget):
         layout.addWidget(self.stations['station_add_button'],1,0)
         layout.addWidget(self.stations['station_rem_button'],1,1)
         layout.addWidget(self.stations['station_known_stations'],1,2)
-        layout.addWidget(self.stations['station_load_button'],1,3)          
+        layout.addWidget(self.stations['station_load_button'],1,3)
+        layout.addWidget(self.stations['tran_add_button'],2,0)
+        layout.addWidget(self.stations['tran_name_le'],2,1)
+        layout.addWidget(self.stations['tran_rem_button'],2,2)
 
+    def update_transects(self):
+        """ Updating the transect table according to the entries in columns 4 etc. self.stations['station_table'] 
+        """
+        table = self.stations['station_table'] 
+        nrows = table.rowCount()
+        ncols = table.columnCount()
+        tran_names   = []
+        tran_numbers = []
+        tran_station_names = []
+        tran_station_lon = []
+        tran_station_lat = []                      
             
+        if(ncols > 3): # Do we have transects at all
+            for i in range(4,ncols):
+                tran_names.append(table.horizontalHeaderItem(i).text())
+                tran_numbers.append([])
+                tran_station_names.append([])
+                tran_station_lon.append([])
+                tran_station_lat.append([])
+                for j in range(nrows):
+                    try:
+                        #print('Valid number in',j,i)
+                        num = int(table.item(j,i).text())
+                        tran_numbers[-1].append(num)
+                        tran_station_names[-1].append(table.item(j,0).text())
+                        tran_station_lon[-1].append(float(table.item(j,1).text()))
+                        tran_station_lat[-1].append(float(table.item(j,2).text()))
+                    except Exception as e: # not a valid number
+                        pass
+                        #print('Not a valid numer in ',j,i)
+
+        # Update the transect table
+        self.tran['table'].clear()
+        self.tran['table'].setColumnCount(len(tran_names))
+        self.tran['table'].setHorizontalHeaderLabels(tran_names)
+
+        row_max = 0
+        for i in range(len(tran_names)):
+            for j in range(len(tran_station_names[i])):
+                item = QtWidgets.QTableWidgetItem(tran_station_names[i][j])
+                nrows = self.tran['table'].rowCount()
+                if(len(tran_station_names[i]) > row_max):
+                    row_max = len(tran_station_names[i])
+                #print('nrows',nrows,j)
+                if(nrows < (j+1)):
+                    #print('Adding a row at ',j)
+                    self.tran['table'].insertRow(j)
+
+                self.tran['table'].setItem(j,i, item)
+
+        # Check if we have to many rows and delete them if so
+        drow = self.tran['table'].rowCount() - row_max
+        for i in range(drow):
+            self.tran['table'].removeRow(self.tran['table'].rowCount()-1)            
+            
+        self.tran['table'].resizeColumnsToContents()
+
+        # Sort and save the transects to dictionary
+        for i in range(len(tran_names)):
+            numbers = np.asarray(tran_numbers[i])
+            isort = np.argsort(numbers)
+            tran_numbers[i]       = np.asarray(tran_numbers[i])[isort]
+            tran_station_names[i] = np.asarray(tran_station_names[i])[isort]
+            tran_station_lon[i]   = np.asarray(tran_station_lon[i])[isort]
+            tran_station_lat[i]   = np.asarray(tran_station_lat[i])[isort]            
+
+        self.tran['name']          = tran_names
+        self.tran['numbers']       = tran_numbers
+        self.tran['station_names'] = tran_station_names
+        self.tran['station_lon']   = tran_station_lon
+        self.tran['station_lat']   = tran_station_lat
+        #print(tran_names)
+        #print(tran_numbers)
+        #print(tran_station_names)
+        #print(tran_station_lon)
+        #print(tran_station_lat)                                
+
+    def station_table_cellchanged(self):
+        col = self.stations['station_table'].currentColumn()
+        row = self.stations['station_table'].currentRow()
+        if(col > 3): # Check if we are in the transect columns
+            print('Transect')
+            tran_number = self.stations['station_table'].item(row,col).text()
+            try:
+                tran_number = int(tran_number)
+            except:
+                self.stations['station_table'].item(row,col).setText('Number required')
+                
+            self.update_transects()
+
+
+    def rem_transect(self):    
+        cols = sorted(set(index.column() for index in
+                          self.stations['station_table'].selectedIndexes()),reverse=True)
+
+        for i in cols:
+            if(i > 3):
+                self.stations['station_table'].removeColumn(i)
+
+        self.update_transects()
+        
+    def add_transect(self):
+        """ Creating a new column in station table for transect
+        """
+        # Adding a new column for the transect
+        table = self.stations['station_table']
+        # TODO, create column names according to the data structures
+        ncolumns = table.columnCount()
+        ncolumns += 1
+        table.setColumnCount(ncolumns)
+        transect_name = self.stations['tran_name_le'].text()
+        headeritem = QtWidgets.QTableWidgetItem(transect_name)        
+        table.setHorizontalHeaderItem(ncolumns-1,headeritem)
+        table.resizeColumnsToContents()
+        
     def table_changed(self,row,column):
         """ If a comment was added, add it to the comment list and update the data dictionary
         """
@@ -337,12 +533,21 @@ class mainWidget(QtWidgets.QWidget):
             # Resize the columns
             self.file_table.resizeColumnsToContents()
 
+    def _campaign_rem(self):
+        rows = sorted(set(index.row() for index in
+                          self.camp['table'].selectedIndexes()),reverse=True)
+        for row in rows:
+            #print('Row %d is selected' % row)
+            self.camp['table'].removeRow(row)
+            self.camp['table_nrows'] -= 1                        
+
     def _station_rem(self):
         rows = sorted(set(index.row() for index in
                           self.stations['station_table'].selectedIndexes()),reverse=True)
         for row in rows:
-            print('Row %d is selected' % row)
+            #print('Row %d is selected' % row)
             self.stations['station_table'].removeRow(row)
+            self.stations['station_table_nrows'] -= 1            
 
     def _update_station_table(self):
         self.stations['station_table'].resizeColumnsToContents()
@@ -366,9 +571,19 @@ class mainWidget(QtWidgets.QWidget):
         self.stations['station_table'].setItem(self.stations['station_table_nrows'],3, itemcomment)        
         self.stations['station_table_nrows'] += 1
         if(update_table):
-            self._update_station_table()            
+            self._update_station_table()
 
-    def _station_add_blank(self):    
+    def _campaign_add_blank(self):
+        #print('Station add blank')
+        item = QtWidgets.QTableWidgetItem('Campaign  ' + str(self.camp['table_nrows']))
+        self.camp['table'].insertRow(self.camp['table_nrows'])        
+        self.camp['table'].setItem(self.camp['table_nrows'],0, item)
+        self.camp['table_nrows'] += 1
+        self.camp['table'].resizeColumnsToContents()
+        #self._update_station_table()            
+
+    def _station_add_blank(self):
+        #print('Station add blank')
         item = QtWidgets.QTableWidgetItem('Station  ' + str(self.stations['station_table_nrows']))
         self.stations['station_table'].insertRow(self.stations['station_table_nrows'])        
         self.stations['station_table'].setItem(self.stations['station_table_nrows'],0, item)
@@ -409,7 +624,7 @@ class mainWidget(QtWidgets.QWidget):
 
         
     def plot_map_opts(self):
-        print('Plot map options')
+        #print('Plot map options')
         self._map_options_widget = QtWidgets.QWidget()
         self._map_options_widget.setWindowTitle('pyctd map options')
 
@@ -446,63 +661,23 @@ class mainWidget(QtWidgets.QWidget):
         
         self.plot_map()
         
-    def plot_map(self):
-        #try:
-        #    self.data['lon']
-        #    self.data['lat']
-        #except:
-        #    print('No data')
-        #    #return
-
-        FIG_LON = [-170,180]
-        FIG_LAT = [-89,90]
-        #FIG_LON = [0,180]
-        #FIG_LAT = [0,70]
-        #self.fig       = Figure((5.0, 4.0), dpi=self.dpi)
-        try:
-            self.figwidget
-            NEW_FIGURE=False
-        except:
-            NEW_FIGURE=True
-            
-        self.fig       = Figure(dpi=self.dpi)
-        self.figwidget = QtWidgets.QWidget()
-        self.figwidget.setWindowTitle('pyctd map')
-        self.canvas    = FigureCanvas(self.fig)
-        self.canvas.setParent(self.figwidget)
-        plotLayout = QtWidgets.QVBoxLayout()
-        plotLayout.addWidget(self.canvas)
-        self.figwidget.setLayout(plotLayout)
-        self.canvas.setMinimumSize(self.canvas.size()) # Prevent to make it smaller than the original size
-        self.mpl_toolbar = NavigationToolbar(self.canvas, self.figwidget)
-        plotLayout.addWidget(self.mpl_toolbar)
-        #self.figs.append(fig)
-        self.axes      = self.fig.add_subplot(111,projection=ccrs.Mercator())
-        ax             = self.axes
-        try:
-            print('Setting xlim',self._map_zoom_x,self._map_zoom_y)
-            self.axes.set_xlim(self._map_zoom_x)
-            self.axes.set_ylim(self._map_zoom_y)
-        except Exception as e:
-            print(e)
-            ax.set_extent([FIG_LON[0], FIG_LON[1], FIG_LAT[0], FIG_LAT[1]])
-
-
-        #ax.coastlines()
-        ax.coastlines(self._map_settings['res'])
-        ax.add_feature(cartopy.feature.OCEAN, zorder=0)
-
-        #ax.draw()
-        self.figwidget.show()
-
     def remstation_signal(self,rows):
-        print('Removing stations')
+        #print('Removing stations')
         for row in rows:        
             self.data['pyctd_station'][row] = None
 
         self.update_table()
+
+    def remcampaign_signal(self,rows):
+        #print('Removing stations')
+        for row in rows:        
+            self.data['pyctd_campaign'][row] = None
+
+        self.update_table()        
         
     def station_signal(self,rows):
+        """ Adding a station to the casts
+        """
         self._station_rows = rows
         table = self.stations['station_table']
         self.station_combo.clear()
@@ -519,7 +694,7 @@ class mainWidget(QtWidgets.QWidget):
             table_choose.setItem(row,0,item)
 
         table_choose.resizeColumnsToContents()
-        self.choose_station['button_add'] = QtWidgets.QPushButton('add')
+        self.choose_station['button_add'] = QtWidgets.QPushButton('Add')
         self.choose_station['button_add'].clicked.connect(self._table_choose_add_to_casts)
         self.choose_station['layout'].addWidget(table_choose,0,0,1,2)
         self.choose_station['layout'].addWidget(self.choose_station['button_add'],1,0)
@@ -550,6 +725,57 @@ class mainWidget(QtWidgets.QWidget):
 
 
         self.update_table()
+
+
+    def campaign_signal(self,rows):
+        """ Adding a station to the casts
+        """
+        self._campaign_rows = rows
+        table = self.camp['table']
+        self.choose_campaign = {}
+        self.choose_campaign['widget'] = QtWidgets.QWidget()
+        self.choose_campaign['layout'] = QtWidgets.QGridLayout(self.choose_campaign['widget'])
+        table_choose = QtWidgets.QTableWidget()
+        table_choose.setColumnCount(1)
+        table_choose.setHorizontalHeaderLabels(['Name'])                    
+        for row in range(table.rowCount()):
+            campaign_name = table.item(row,0).text()
+            item = QtWidgets.QTableWidgetItem( campaign_name )            
+            table_choose.insertRow(row)
+            table_choose.setItem(row,0,item)
+
+        table_choose.resizeColumnsToContents()
+        self.choose_campaign['button_add'] = QtWidgets.QPushButton('Add')
+        self.choose_campaign['button_add'].clicked.connect(self._table_choose_campaign_to_casts)
+        self.choose_campaign['layout'].addWidget(table_choose,0,0,1,2)
+        self.choose_campaign['layout'].addWidget(self.choose_campaign['button_add'],1,0)
+        self.choose_campaign['table'] = table_choose            
+        self.choose_campaign['widget'].show()
+
+    def _table_choose_campaign_to_casts(self):
+        print('Hallo! Campaign')
+        rows = sorted(set(index.row() for index in
+                          self.choose_campaign['table'].selectedIndexes()),reverse=False)
+
+        campaigns = ''
+        for row in rows:
+            print('Row %d is selected in choose table: ' % row)
+            campaign_name = self.choose_campaign['table'].item(row,0).text()
+            campaigns += campaign_name + ' ; '
+
+        campaigns = campaigns[:-3] # remove last ;
+        rows = sorted(set(index.row() for index in
+                          self.file_table.selectedIndexes()),reverse=True)
+
+
+        for row in rows:
+            print('Row %d is selected in campaign table: ' % row)
+            #item = QtWidgets.QTableWidgetItem( campaigns )
+            self.data['pyctd_campaign'][row] = campaigns                    
+            #self.file_table.setItem(row,self.columns['station (Custom)'], item)                        
+
+
+        self.update_table()        
 
         
     def plot_signal(self,rows,command):
@@ -666,6 +892,11 @@ class mainWidget(QtWidgets.QWidget):
             data_new['pyctd_station']
         except:
             data_new['pyctd_station'] = [None] * len(data_new['info_dict']) # station information
+
+        try:
+            data_new['pyctd_campaign']
+        except:
+            data_new['pyctd_campaign'] = [None] * len(data_new['info_dict']) # station information            
             
         try:
             data_new['pyctd_comment']
@@ -756,7 +987,17 @@ class mainWidget(QtWidgets.QWidget):
                 item = QtWidgets.QTableWidgetItem( str('') )
 
             item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable                
-            self.file_table.setItem(i,self.columns['station (Custom)'], item)                
+            self.file_table.setItem(i,self.columns['station (Custom)'], item)
+
+            # Campaign as defined in pyctd
+            stat = self.data['pyctd_campaign'][i]
+            if(stat is not None):
+                item = QtWidgets.QTableWidgetItem( str(stat) )
+            else:
+                item = QtWidgets.QTableWidgetItem( str('') )
+
+            item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable                
+            self.file_table.setItem(i,self.columns['campaign'], item)                            
 
             # Comment
             comstr  = self.data['pyctd_comment'][i]                   
@@ -1001,6 +1242,7 @@ class mainWidget(QtWidgets.QWidget):
             return
         # use safe_load instead load
         stations_yaml = yaml.safe_load(f_stations)
+        f_stations.close()
         for i,station in enumerate(stations_yaml['stations']):
             name = station['name']
             lon  = station['longitude']
