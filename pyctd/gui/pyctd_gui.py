@@ -15,6 +15,7 @@ import copy
 import pkg_resources
 import re
 import numpy as np
+import geojson
 
 # Get the version
 version_file = pkg_resources.resource_filename('pyctd','VERSION')
@@ -39,6 +40,28 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.figure import Figure
 
 
+def create_geojson_summary(summary,filename,name='CTD',properties=['date','lon','lat','station','file','comment']):
+    """ Creates a geojson summary
+    """
+    print('Create geojson summary in file:' + filename)    
+    features = []
+    for i,d in enumerate(summary['casts']):
+        csv_line = ''
+        lon = d['lon']
+        lat = d['lat']
+        p = geojson.Point((lon, lat))
+        prop = {}
+        for o in properties:
+            prop[o] = d[o]
+            
+        feature = geojson.Feature(geometry=p, properties=prop)
+        features.append(feature)
+    crs = { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } } # Reference coordinate system
+    featurecol = geojson.FeatureCollection(features,name=name,crs=crs)  
+    with open(filename, 'w') as outfile:
+        geojson.dump(featurecol, outfile)
+
+    outfile.close()
 
 
 def create_yaml_summary(summary,filename):
@@ -248,7 +271,7 @@ class mainWidget(QtWidgets.QWidget):
             
         #self.file_table.horizontalHeader().setStretchLastSection(True)
         self.file_table.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-
+        self.file_table.resizeColumnsToContents()        
         self.file_table_widget_layout.addWidget(self.file_table)
         self.file_table_widget_layout.addWidget(self.clear_table_button)
 
@@ -256,7 +279,9 @@ class mainWidget(QtWidgets.QWidget):
         self.setup_stations_widget()
         # Transect table widget setup
         self.setup_transect_widget()
-        self.setup_campaign_widget()                
+        self.setup_campaign_widget()
+        self.setup_plot_widget()
+        self.setup_save_widget()        
         
         # Tabs
         self.tabs = QtWidgets.QTabWidget()
@@ -264,6 +289,8 @@ class mainWidget(QtWidgets.QWidget):
         self.tabs.addTab(self.stations['station_widget'],'Stations')
         self.tabs.addTab(self.tran['widget'],'Transects')
         self.tabs.addTab(self.camp['widget'],'Campaigns')
+        self.tabs.addTab(self.plot['widget'],'Plot')
+        self.tabs.addTab(self.save['widget'],'Load/Save')        
         self.layout = QtWidgets.QGridLayout(self)
         self.layout.addWidget(self.folder_dialog,0,0)
         self.layout.addWidget(self.folder_button,0,1)
@@ -311,7 +338,25 @@ class mainWidget(QtWidgets.QWidget):
 
         # Map plotting settings
         self._map_settings = {'res':'110m'}
-
+        
+    def setup_plot_widget(self):
+        self.plot = {}
+        self.plot['widget'] = QtWidgets.QWidget()
+        
+    def setup_save_widget(self):
+        self.save = {}
+        self.save['widget'] = QtWidgets.QWidget()
+        # TODO, do the layout right, it looks really bad at the moment
+        self.save['save'] = QtWidgets.QPushButton('Save')
+        self.save['save'].clicked.connect(self.save_all)
+        width = self.save['save'].fontMetrics().boundingRect('Save').width() + 7
+        self.save['save'].setMaximumWidth(width)
+        self.save['load'] = QtWidgets.QPushButton('Load')
+        self.save['load'].clicked.connect(self.load_summary)
+        self.save['layout'] = QtWidgets.QGridLayout(self.save['widget'])
+        self.save['layout'].addWidget(self.save['save'],0,0)
+        self.save['layout'].addWidget(self.save['load'],1,0)
+        
     def setup_campaign_widget(self):
         self.camp = {}
         self.camp['widget'] = QtWidgets.QWidget()        
@@ -378,6 +423,7 @@ class mainWidget(QtWidgets.QWidget):
         for i in range(ncolumns):
             table.horizontalHeaderItem(i).setTextAlignment(QtCore.Qt.AlignHCenter)
 
+        table.resizeColumnsToContents()        
         self.stations['station_table_nrows'] = 0            
         self.stations['station_add_button'] = QtWidgets.QPushButton('Add')
         self.stations['station_add_button'].clicked.connect(self._station_add_blank)
@@ -1027,15 +1073,21 @@ class mainWidget(QtWidgets.QWidget):
         #self._i_widget.setText(tstr)
         self._f_widget.setText(fstr)
 
+    def save_all(self):
+        """ This function save everything (casts, stations, transects)
+        """
+        self.create_cast_summary()
+            
     def create_cast_summary(self):
-        """ Creates a summary from the given sum_dict
+        """ Creates a summary from the given sum_dict for all casts read in
         """
 
         cwd = os.getcwd()
-        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for yaml summary","","YAML File (*.yaml);;CSV File (*.csv);;All Files (*)")
+        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","YAML File (*.yaml);;GEOJSON File (*.geojson);;CSV File (*.csv);;All Files (*)")
         if 'yaml' in extension and ('.yaml' not in filename):
             filename += '.yaml'
-
+        if 'geojson' in extension and ('.geojson' not in filename):
+            filename += '.geojson'
         if 'csv' in extension and ('.csv' not in filename):
             filename += '.csv'            
             
@@ -1044,30 +1096,32 @@ class mainWidget(QtWidgets.QWidget):
             self.data['info_dict']
         except:
             return
-        # Add cruise information
-        try:
-            yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']
-        except Exception as e:
-            def diag_clicked_ok():
-                self._cruise_fields['Cruise ID'] = str(cruise.text())
-                yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']                
-                self._diag_cruise.close()
-            def diag_clicked_cancel():
-                self._diag_cruise.close()
-                
-            diag = QtWidgets.QDialog()
-            layout = QtWidgets.QVBoxLayout(diag)
-            buttons = QtWidgets.QDialogButtonBox( QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-                                                  QtCore.Qt.Horizontal, diag)
-            buttons.accepted.connect(diag_clicked_ok)
-            buttons.rejected.connect(diag_clicked_cancel)
-            cruise_label = QtWidgets.QLabel('You did not define a cruise ID.\n If you want to do it now,\n enter it below and press "ok"')            
-            cruise = QtWidgets.QLineEdit(diag)
-            layout.addWidget(cruise_label)
-            layout.addWidget(cruise)            
-            layout.addWidget(buttons)
-            self._diag_cruise = diag
-            retval = diag.exec_()
+
+        if False:
+            # Add cruise information
+            try:
+                yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']
+            except Exception as e:
+                def diag_clicked_ok():
+                    self._cruise_fields['Cruise ID'] = str(cruise.text())
+                    yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']                
+                    self._diag_cruise.close()
+                def diag_clicked_cancel():
+                    self._diag_cruise.close()
+
+                diag = QtWidgets.QDialog()
+                layout = QtWidgets.QVBoxLayout(diag)
+                buttons = QtWidgets.QDialogButtonBox( QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+                                                      QtCore.Qt.Horizontal, diag)
+                buttons.accepted.connect(diag_clicked_ok)
+                buttons.rejected.connect(diag_clicked_cancel)
+                cruise_label = QtWidgets.QLabel('You did not define a cruise ID.\n If you want to do it now,\n enter it below and press "ok"')            
+                cruise = QtWidgets.QLineEdit(diag)
+                layout.addWidget(cruise_label)
+                layout.addWidget(cruise)            
+                layout.addWidget(buttons)
+                self._diag_cruise = diag
+                retval = diag.exec_()
 
             
         yaml_dict['created'] = str(datetime.datetime.now(pytz.utc))
@@ -1095,6 +1149,8 @@ class mainWidget(QtWidgets.QWidget):
             create_yaml_summary(yaml_dict,filename)                
         elif 'csv' in extension:                
             create_csv_summary(yaml_dict,filename)
+        elif 'geojson' in extension:                            
+            create_geojson_summary(yaml_dict,filename)
 
     def create_cruise_summary(self):
         try:
