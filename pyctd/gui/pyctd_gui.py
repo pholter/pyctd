@@ -40,11 +40,18 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.figure import Figure
 
 
-def create_geojson_summary(summary,filename,name='CTD',properties=['date','lon','lat','station','file','comment']):
+def create_geojson_summary(summary,filename,name='CTD',properties='all'):
     """ Creates a geojson summary
     """
     print('Create geojson summary in file:' + filename)    
     features = []
+    #['date','lon','lat','station','campaign','file','comment']
+    if(properties == 'all'):
+        try:
+            properties = summary['casts'][0].keys()
+        except:
+            properties = []
+            
     for i,d in enumerate(summary['casts']):
         csv_line = ''
         lon = d['lon']
@@ -56,6 +63,7 @@ def create_geojson_summary(summary,filename,name='CTD',properties=['date','lon',
             
         feature = geojson.Feature(geometry=p, properties=prop)
         features.append(feature)
+        
     crs = { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } } # Reference coordinate system
     featurecol = geojson.FeatureCollection(features,name=name,crs=crs)  
     with open(filename, 'w') as outfile:
@@ -1073,15 +1081,24 @@ class mainWidget(QtWidgets.QWidget):
         #self._i_widget.setText(tstr)
         self._f_widget.setText(fstr)
 
-    def save_all(self):
-        """ This function save everything (casts, stations, transects)
+    def save_all(self):        
+        #self.save(casts=True,stations=True,transects=True)
+        self.save_data(casts=True,stations=False,transects=False)
+        
+    def save_data(self,casts=False,stations=False,transects=False):
+        """ This function saves everything (casts, stations, transects)
         """
-        self.create_cast_summary()
-            
-    def create_cast_summary(self):
-        """ Creates a summary from the given sum_dict for all casts read in
-        """
-
+        cast_dict    = self.create_cast_summary()
+        station_dict = self.create_station_summary()
+        yaml_dict = {}
+        if casts:
+            yaml_dict.update(cast_dict)
+        elif stations:
+            yaml_dict.update(station_dict)
+        elif transects:
+            pass
+        
+        # Do the actual saving
         cwd = os.getcwd()
         filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","YAML File (*.yaml);;GEOJSON File (*.geojson);;CSV File (*.csv);;All Files (*)")
         if 'yaml' in extension and ('.yaml' not in filename):
@@ -1089,41 +1106,45 @@ class mainWidget(QtWidgets.QWidget):
         if 'geojson' in extension and ('.geojson' not in filename):
             filename += '.geojson'
         if 'csv' in extension and ('.csv' not in filename):
-            filename += '.csv'            
+            filename += '.csv'
+
+        # Save the files
+        if 'yaml' in extension:                
+            create_yaml_summary(yaml_dict,filename)                
+        elif 'csv' in extension:                
+            create_csv_summary(yaml_dict,filename)
+        elif 'geojson' in extension:                            
+            create_geojson_summary(yaml_dict,filename)            
+
+    def create_station_summary(self):
+        """ Creates a summary of all stations read in
+        """
+
+        yaml_dict = {}
+        yaml_dict['created'] = str(datetime.datetime.now(pytz.utc))
+        yaml_dict['version'] = version        
+        yaml_dict['stations'] = []
+        table = self.stations['station_table']
+        #self.stations['station_table']
+        for row in range(table.rowCount()):
+            station = {}
+            station['name'] = table.item(row,0).text()
+            station['lon'] = table.item(row,1)
+            station['lat'] = table.item(row,2)
+
+            yaml_dict['stations'].append(station)
+
+        return yaml_dict
             
+    def create_cast_summary(self):
+        """ Creates a summary from the given sum_dict for all casts read in
+        """
         yaml_dict = {}
         try:
             self.data['info_dict']
         except:
             return
 
-        if False:
-            # Add cruise information
-            try:
-                yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']
-            except Exception as e:
-                def diag_clicked_ok():
-                    self._cruise_fields['Cruise ID'] = str(cruise.text())
-                    yaml_dict['Cruise ID'] = self._cruise_fields['Cruise ID']                
-                    self._diag_cruise.close()
-                def diag_clicked_cancel():
-                    self._diag_cruise.close()
-
-                diag = QtWidgets.QDialog()
-                layout = QtWidgets.QVBoxLayout(diag)
-                buttons = QtWidgets.QDialogButtonBox( QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-                                                      QtCore.Qt.Horizontal, diag)
-                buttons.accepted.connect(diag_clicked_ok)
-                buttons.rejected.connect(diag_clicked_cancel)
-                cruise_label = QtWidgets.QLabel('You did not define a cruise ID.\n If you want to do it now,\n enter it below and press "ok"')            
-                cruise = QtWidgets.QLineEdit(diag)
-                layout.addWidget(cruise_label)
-                layout.addWidget(cruise)            
-                layout.addWidget(buttons)
-                self._diag_cruise = diag
-                retval = diag.exec_()
-
-            
         yaml_dict['created'] = str(datetime.datetime.now(pytz.utc))
         yaml_dict['version'] = version
         yaml_dict['casts']   = copy.deepcopy(self.data['info_dict'])
@@ -1138,19 +1159,19 @@ class mainWidget(QtWidgets.QWidget):
             if(self.data['pyctd_comment'][i] is not None):
                 yaml_dict['casts'][i]['comment'] = self.data['pyctd_comment'][i]
             else:
-                yaml_dict['casts'][i]['comment'] = ''                
+                yaml_dict['casts'][i]['comment'] = ''
+
+            if(self.data['pyctd_campaign'][i] is not None):
+                yaml_dict['casts'][i]['campaign'] = self.data['pyctd_campaign'][i]
+            else:
+                yaml_dict['casts'][i]['campaign'] = ''                                
                 
             if(self.FLAG_REL_PATH):
                 fname = yaml_dict['casts'][i]['file']
                 fname = fname.replace(self.foldername,'.') # TODO, check if filesep is needed for windows
                 yaml_dict['casts'][i]['file'] = fname
-
-        if 'yaml' in extension:                
-            create_yaml_summary(yaml_dict,filename)                
-        elif 'csv' in extension:                
-            create_csv_summary(yaml_dict,filename)
-        elif 'geojson' in extension:                            
-            create_geojson_summary(yaml_dict,filename)
+                
+        return yaml_dict
 
     def create_cruise_summary(self):
         try:
@@ -1212,7 +1233,12 @@ class mainWidget(QtWidgets.QWidget):
             try:
                 data['pyctd_comment'].append(c['comment'])
             except Exception as e:
-                data['pyctd_comment'].append(None)                
+                data['pyctd_comment'].append(None)
+
+            try:
+                data['pyctd_campaign'].append(c['campaign'])
+            except Exception as e:
+                data['pyctd_campaign'].append(None)                                
                 
             date = datetime.datetime.strptime(c['date'],'%Y-%m-%d %H:%M:%S%z')
             data['info_dict'][i]['date'] = date
