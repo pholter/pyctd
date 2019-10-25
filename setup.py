@@ -16,7 +16,7 @@ setup(name='pyctd',
       packages=['pyctd'],
       scripts = [],
       entry_points={ 'console_scripts': ['pycnv_cmd=pyctd.pycnv:main','pyctd=pyctd.gui.pyctd_gui:main', 'pymrd=pyctd.sst.pymrd:main']},
-      package_data = {'':['VERSION','stations/iow_stations.yaml','rules/standard_names.yaml']},
+      package_data = {'':['VERSION','stations/iow_stations.yaml','ships/ships.yaml']},
       install_requires=[ 'gsw', 'pyproj','pytz','pyaml','pycnv','geojson' ],
       zip_safe=False)
 

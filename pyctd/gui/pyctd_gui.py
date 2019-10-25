@@ -19,6 +19,11 @@ import geojson
 
 # Get the version
 version_file = pkg_resources.resource_filename('pyctd','VERSION')
+# Get the ships
+ship_file = pkg_resources.resource_filename('pyctd', 'ships/ships.yaml')
+sfile = open(ship_file, 'r')
+ships = yaml.load(sfile)
+sfile.close()
 
 with open(version_file) as version_f:
    version = version_f.read().strip()
@@ -43,33 +48,96 @@ from matplotlib.figure import Figure
 def create_geojson_summary(summary,filename,name='CTD',properties='all'):
     """ Creates a geojson summary
     """
-    print('Create geojson summary in file:' + filename)    
-    features = []
+    print('Create geojson summary in file:' + filename)
+    crs = { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } } # Reference coordinate system
+
     #['date','lon','lat','station','campaign','file','comment']
     if(properties == 'all'):
         try:
             properties = summary['casts'][0].keys()
         except:
             properties = []
-            
-    for i,d in enumerate(summary['casts']):
-        csv_line = ''
-        lon = d['lon']
-        lat = d['lat']
-        p = geojson.Point((lon, lat))
-        prop = {}
-        for o in properties:
-            prop[o] = d[o]
-            
-        feature = geojson.Feature(geometry=p, properties=prop)
-        features.append(feature)
-        
-    crs = { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } } # Reference coordinate system
-    featurecol = geojson.FeatureCollection(features,name=name,crs=crs)  
-    with open(filename, 'w') as outfile:
-        geojson.dump(featurecol, outfile)
 
-    outfile.close()
+        try:
+            properties_stations = summary['stations'][0].keys()
+        except:
+            properties_stations = []
+
+        try:
+            properties_transects = summary['transects'].keys()
+        except:
+            properties_transects = []                        
+
+    
+    filename_ctd       = filename.replace('.geojson','') + '_CTD_casts.geojson'
+    filename_stations  = filename.replace('.geojson','') + '_stations.geojson'
+    filename_transects = filename.replace('.geojson','') + '_transects.geojson'    
+    
+    if(len(properties) > 0):
+        features = []
+        for i,d in enumerate(summary['casts']):
+            csv_line = ''
+            lon = d['lon']
+            lat = d['lat']
+            p = geojson.Point((lon, lat))
+            prop = {}
+            for o in properties:
+                prop[o] = d[o]
+
+            feature = geojson.Feature(geometry=p, properties=prop)
+            features.append(feature)
+
+        featurecol = geojson.FeatureCollection(features,name=name,crs=crs)
+        with open(filename_ctd, 'w') as outfile:
+            geojson.dump(featurecol, outfile)
+
+        outfile.close()
+
+    if(len(properties_stations) > 0):
+        features_stations = []
+        for i,d in enumerate(summary['stations']):
+            csv_line = ''
+            lon = d['lon']
+            lat = d['lat']
+            p = geojson.Point((lon, lat))
+            prop = {}
+            for o in properties_stations:
+                prop[o] = d[o]
+
+            feature = geojson.Feature(geometry=p, properties=prop)
+            features_stations.append(feature)
+            
+        featurecol_stations = geojson.FeatureCollection(features_stations,name='stations',crs=crs)
+        with open(filename_stations, 'w') as outfile:
+            geojson.dump(featurecol_stations, outfile)
+            
+        outfile.close()
+
+    if(len(properties_transects) > 0):
+        features_transects = []
+        #self.tran['name']          = tran_names
+        #self.tran['numbers']       = tran_numbers
+        #self.tran['station_names'] = tran_station_names
+        #self.tran['station_lon']   = tran_station_lon
+        #self.tran['station_lat']   = tran_station_lat
+        for i,d in enumerate(summary['transects']['name']):
+            lon   = summary['transects']['station_lon'][i]
+            lat   = summary['transects']['station_lat'][i]
+            ps = []            
+            for k in range(len(lon)):
+                ps.append((lon[k], lat[k]))
+
+            gl = geojson.LineString(ps)                          
+            prop = {'name':summary['transects']['name'][i]}
+
+            feature = geojson.Feature(geometry=gl, properties=prop)
+            features_transects.append(feature)
+            
+        featurecol_transects = geojson.FeatureCollection(features_transects,name='transects',crs=crs)
+        with open(filename_transects, 'w') as outfile:
+            geojson.dump(featurecol_transects, outfile)
+            
+        outfile.close()        
 
 
 def create_yaml_summary(summary,filename):
@@ -293,7 +361,7 @@ class mainWidget(QtWidgets.QWidget):
         
         # Tabs
         self.tabs = QtWidgets.QTabWidget()
-        self.tabs.addTab(self.file_table_widget,'Files')
+        self.tabs.addTab(self.file_table_widget,'Casts')
         self.tabs.addTab(self.stations['station_widget'],'Stations')
         self.tabs.addTab(self.tran['widget'],'Transects')
         self.tabs.addTab(self.camp['widget'],'Campaigns')
@@ -394,9 +462,15 @@ class mainWidget(QtWidgets.QWidget):
         self.camp['add_button'].clicked.connect(self._campaign_add_blank)
         self.camp['rem_button'] = QtWidgets.QPushButton('Rem')
         self.camp['rem_button'].clicked.connect(self._campaign_rem)
+        self.camp['add_ship_button'] = QtWidgets.QPushButton('Add Ship')
+        self.camp['add_ship_button'].clicked.connect(self._campaign_add_ship)
+        self.camp['ship_combo'] = QtWidgets.QComboBox()
+        self._populate_ship_combo()
         self.camp['layout'].addWidget(self.camp['table'],0,0,1,2)
         self.camp['layout'].addWidget(self.camp['add_button'],1,0)
-        self.camp['layout'].addWidget(self.camp['rem_button'],1,1)        
+        self.camp['layout'].addWidget(self.camp['rem_button'],1,1)
+        self.camp['layout'].addWidget(self.camp['add_ship_button'],2,1)
+        self.camp['layout'].addWidget(self.camp['ship_combo'],2,0)                        
         #self.tran['station_table'].cellChanged.connect(self._update_station_table)
         self.camp['table'].resizeColumnsToContents()        
 
@@ -462,6 +536,13 @@ class mainWidget(QtWidgets.QWidget):
         layout.addWidget(self.stations['tran_add_button'],2,0)
         layout.addWidget(self.stations['tran_name_le'],2,1)
         layout.addWidget(self.stations['tran_rem_button'],2,2)
+
+    def _populate_ship_combo(self):
+        """ Populates the ship combo with known ships found in yaml file
+        """
+
+        for s in ships['ships']:
+            self.camp['ship_combo'].addItem(s['name'])
 
     def update_transects(self):
         """ Updating the transect table according to the entries in columns 4 etc. self.stations['station_table'] 
@@ -626,6 +707,10 @@ class mainWidget(QtWidgets.QWidget):
         self.stations['station_table_nrows'] += 1
         if(update_table):
             self._update_station_table()
+
+
+    def _campaign_add_ship(self):
+        pass
 
     def _campaign_add_blank(self):
         #print('Station add blank')
@@ -1083,24 +1168,25 @@ class mainWidget(QtWidgets.QWidget):
 
     def save_all(self):        
         #self.save(casts=True,stations=True,transects=True)
-        self.save_data(casts=True,stations=False,transects=False)
+        self.save_data(casts=True,stations=True,transects=True)
         
     def save_data(self,casts=False,stations=False,transects=False):
         """ This function saves everything (casts, stations, transects)
         """
         cast_dict    = self.create_cast_summary()
         station_dict = self.create_station_summary()
+        transect_dict = self.create_transect_summary()        
         yaml_dict = {}
         if casts:
             yaml_dict.update(cast_dict)
-        elif stations:
+        if stations:
             yaml_dict.update(station_dict)
-        elif transects:
-            pass
+        if transects:
+            yaml_dict.update(transect_dict)
         
         # Do the actual saving
         cwd = os.getcwd()
-        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","YAML File (*.yaml);;GEOJSON File (*.geojson);;CSV File (*.csv);;All Files (*)")
+        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","GEOJSON File (*.geojson);;CSV File (*.csv);;YAML File (*.yaml);;All Files (*)")
         if 'yaml' in extension and ('.yaml' not in filename):
             filename += '.yaml'
         if 'geojson' in extension and ('.geojson' not in filename):
@@ -1129,12 +1215,27 @@ class mainWidget(QtWidgets.QWidget):
         for row in range(table.rowCount()):
             station = {}
             station['name'] = table.item(row,0).text()
-            station['lon'] = table.item(row,1)
-            station['lat'] = table.item(row,2)
+            station['lon'] = float(table.item(row,1).text())
+            station['lat'] = float(table.item(row,2).text())
 
             yaml_dict['stations'].append(station)
 
         return yaml_dict
+
+    def create_transect_summary(self):
+        """ Creates a summary of all stations read in
+        """
+        # self.tran is updated in update_transects function
+        #self.tran['name']          = tran_names
+        #self.tran['numbers']       = tran_numbers
+        #self.tran['station_names'] = tran_station_names
+        #self.tran['station_lon']   = tran_station_lon
+        #self.tran['station_lat']   = tran_station_lat
+        yaml_dict = {}
+        yaml_dict['transects'] = self.tran
+        
+        return yaml_dict
+
             
     def create_cast_summary(self):
         """ Creates a summary from the given sum_dict for all casts read in
@@ -1143,7 +1244,7 @@ class mainWidget(QtWidgets.QWidget):
         try:
             self.data['info_dict']
         except:
-            return
+            return {}
 
         yaml_dict['created'] = str(datetime.datetime.now(pytz.utc))
         yaml_dict['version'] = version
