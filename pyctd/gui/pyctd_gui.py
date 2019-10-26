@@ -453,11 +453,16 @@ class mainWidget(QtWidgets.QWidget):
         self.camp['table']  = QtWidgets.QTableWidget()
         table_columns                     = {}
         table_columns['Name']             = 0        
-        table_columns['Ship name']        = 1        
-        table_columns['Ship callsign']    = 2
-        table_columns['Project']          = 3
-        table_columns['Contact (name)']   = 4        
-        table_columns['Contact (email)']  = 5
+        table_columns['Project']          = 1
+        table_columns['Contact (name)']   = 2        
+        table_columns['Contact (email)']  = 3
+        self.camp['index_ship'] = 4
+        i = self.camp['index_ship']
+        # Add ship columns        
+        for k in ships['ships'][0].keys():
+            table_columns['Ship ' + k] = i
+            i += 1
+            
         table = self.camp['table']
         ncolumns = len(table_columns.keys())      
         table.setColumnCount(ncolumns)
@@ -554,7 +559,6 @@ class mainWidget(QtWidgets.QWidget):
     def _populate_ship_combo(self):
         """ Populates the ship combo with known ships found in yaml file
         """
-
         for s in ships['ships']:
             self.camp['ship_combo'].addItem(s['name'])
 
@@ -722,10 +726,29 @@ class mainWidget(QtWidgets.QWidget):
         if(update_table):
             self._update_station_table()
 
-
     def _campaign_add_ship(self):
-        pass
+        self.camp['index_ship']
+        i = self.camp['ship_combo'].currentIndex()
+        ship = ships['ships'][i] # Get the choosen ship
+        iship = self.camp['index_ship'] # The index in self.camp['table']
+        rows = sorted(set(index.row() for index in
+                        self.camp['table'].selectedIndexes()),reverse=True)
 
+        if(len(rows)>0):
+            for i,k in enumerate(ship.keys()):
+                for r in rows:
+                    if ship[k] == None:
+                        sstr = ''
+                    else:
+                        sstr = str(ship[k])
+                        
+                    item = QtWidgets.QTableWidgetItem(sstr)
+                    self.camp['table'].setItem(r,iship+i, item)
+
+
+        self.camp['table'].resizeColumnsToContents()
+
+            
     def _campaign_add_blank(self):
         #print('Station add blank')
         item = QtWidgets.QTableWidgetItem('Campaign  ' + str(self.camp['table_nrows']))
@@ -1217,7 +1240,7 @@ class mainWidget(QtWidgets.QWidget):
             # Save the files
             if stype is 'yaml':
                 create_yaml_summary(yaml_dict,filename)
-            if stype is 'geojson':            
+            if stype is 'geojson':
                 create_geojson_summary(yaml_dict,filename)
 
     def save_csv(self):
