@@ -90,15 +90,19 @@ class pymrd():
         cruise = cruise.rstrip('_')
         hs = header.split('\\r')
         sensor_str = []
+        mss = None
         for i in range(17,len(hs)-1):
             sensor_str.append(hs[i])
             #if(hs[i].find('107') >=0):
-            if(hs[i].find('COUNT') >=0):
+            if(hs[i].upper().find('COUNT') >=0):
                 mss = hs[i].split(' ')[1]
 
-        self.cruise = cruise
-        self.ship   = ship
-        self.mss    = mss
+        if mss is not None:
+            self.cruise = cruise
+            self.ship   = ship
+            self.mss    = mss
+        else:
+            logger.warning('Could not find a MSS')
 
         
     def get_info_dict(self):
@@ -148,9 +152,9 @@ class pymrd():
                 # We are in the data body        
                 if(IN_HEADER == False):
                     bword = []
-                    for i in range(1,16,2):
+                    for i in range(1,16,2): # Reading 16 bytes and treat them as words
                         bword.append(int.from_bytes(b[i:i+2],byteorder='little'))
-                    if(b[0] == 1):
+                    if(b[0] == 1): # Time packet
                         if(HAVE_TIME == False):
                             year = int(bword[0])
                             year = bword[0]
@@ -163,7 +167,7 @@ class pymrd():
                             self.date = date
                             HAVE_TIME = True
 
-                    if(b[0] == 3):
+                    if(b[0] == 3): # Position packet
                         if(HAVE_POS == False):
                             # Latitude
                             latint    = int.from_bytes(b[1:3],byteorder='little')
@@ -173,7 +177,11 @@ class pymrd():
                             lat       = latint & 0x1FFF
                             latdeg    = (lat - lat%100)/100
                             latmindec = int.from_bytes(b[3:5],byteorder='little')
-                            digits    = int(math.log10(latmindec)) + 1
+                            if(abs(latmindec) > 0):                            
+                                digits    = int(math.log10(latmindec)) + 1
+                            else:
+                                digits    = 0
+                                
                             latmin    = lat%100 + latmindec / 10**digits
                             latdec    = latsign * (latdeg + latmin/60)
                             # Longitude
@@ -184,7 +192,11 @@ class pymrd():
                             lon       = lonint & 0x1FFF
                             londeg    = (lon - lon%100)/100
                             lonmindec = int.from_bytes(b[7:9],byteorder='little')
-                            digits    = int(math.log10(lonmindec)) + 1
+                            if(abs(lonmindec) > 0):
+                                digits    = int(math.log10(lonmindec)) + 1
+                            else:
+                                digits    = 0
+                                
                             lonmin    = lon%100 + lonmindec / 10**digits
                             londec    = lonsign * (londeg + lonmin/60 )
                             # Daytime
