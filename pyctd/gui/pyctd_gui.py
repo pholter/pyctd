@@ -22,7 +22,7 @@ version_file = pkg_resources.resource_filename('pyctd','VERSION')
 # Get the ships
 ship_file = pkg_resources.resource_filename('pyctd', 'ships/ships.yaml')
 sfile = open(ship_file, 'r')
-ships = yaml.load(sfile)
+ships = yaml.safe_load(sfile)
 sfile.close()
 
 with open(version_file) as version_f:
@@ -115,11 +115,11 @@ def create_geojson_summary(summary,filename,name='CTD',properties='all'):
 
     if(len(properties_transects) > 0):
         features_transects = []
-        #self.tran['name']          = tran_names
-        #self.tran['numbers']       = tran_numbers
-        #self.tran['station_names'] = tran_station_names
-        #self.tran['station_lon']   = tran_station_lon
-        #self.tran['station_lat']   = tran_station_lat
+        #self.tran['name']          
+        #self.tran['numbers']       
+        #self.tran['station_names'] 
+        #self.tran['station_lon']   
+        #self.tran['station_lat']   
         for i,d in enumerate(summary['transects']['name']):
             lon   = summary['transects']['station_lon'][i]
             lat   = summary['transects']['station_lat'][i]
@@ -143,6 +143,9 @@ def create_geojson_summary(summary,filename,name='CTD',properties='all'):
 def create_yaml_summary(summary,filename):
     """ Creates a yaml summary
     """
+    if ('.yaml' not in filename):
+        filename += '.yaml'
+        
     print('Create yaml summary in file:' + filename)
     with open(filename, 'w') as outfile:
         yaml.dump(summary, outfile, default_flow_style=False)
@@ -153,7 +156,11 @@ def create_csv_summary(summary,filename,order=['date','lon','lat','station','fil
     """
     print('Create csv summary in file:' + filename)
     print(summary)
-    outfile = open(filename, 'w')
+    try:
+        outfile = open(filename, 'w')
+    except Exception as e:
+        return
+    
     csv_line = ''
     for o in order:
         csv_line += str(o) +','
@@ -426,12 +433,19 @@ class mainWidget(QtWidgets.QWidget):
         self.save['save'] = QtWidgets.QPushButton('Save')
         self.save['save'].clicked.connect(self.save_all)
         width = self.save['save'].fontMetrics().boundingRect('Save').width() + 7
+        self.save['save_geojson'] = QtWidgets.QPushButton('Export casts/stations/transects to geojson')
+        self.save['save_geojson'].clicked.connect(self.save_geojson)        
+        self.save['save_csv'] = QtWidgets.QPushButton('Export casts to csv')
+        self.save['save_csv'].clicked.connect(self.save_csv)
+
         self.save['save'].setMaximumWidth(width)
         self.save['load'] = QtWidgets.QPushButton('Load')
         self.save['load'].clicked.connect(self.load_summary)
         self.save['layout'] = QtWidgets.QGridLayout(self.save['widget'])
         self.save['layout'].addWidget(self.save['save'],0,0)
-        self.save['layout'].addWidget(self.save['load'],1,0)
+        self.save['layout'].addWidget(self.save['save_geojson'],1,0)                
+        self.save['layout'].addWidget(self.save['save_csv'],2,0)        
+        self.save['layout'].addWidget(self.save['load'],3,0)
         
     def setup_campaign_widget(self):
         self.camp = {}
@@ -1072,7 +1086,6 @@ class mainWidget(QtWidgets.QWidget):
 
         return data
         
-        
     def create_table(self):
         # Add additional information (if its not there already)
 
@@ -1168,9 +1181,12 @@ class mainWidget(QtWidgets.QWidget):
 
     def save_all(self):        
         #self.save(casts=True,stations=True,transects=True)
-        self.save_data(casts=True,stations=True,transects=True)
+        self.save_data(casts=True,stations=True,transects=True,campaigns=True)
+
+    def save_geojson(self):
+        self.save_data(casts=True,stations=True,transects=True,stype='geojson')
         
-    def save_data(self,casts=False,stations=False,transects=False):
+    def save_data(self,casts=False,stations=False,transects=False,campaigns=False,stype='yaml'):
         """ This function saves everything (casts, stations, transects)
         """
         cast_dict    = self.create_cast_summary()
@@ -1183,24 +1199,34 @@ class mainWidget(QtWidgets.QWidget):
             yaml_dict.update(station_dict)
         if transects:
             yaml_dict.update(transect_dict)
+        if campaigns:
+            pass
         
         # Do the actual saving
         cwd = os.getcwd()
-        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","GEOJSON File (*.geojson);;CSV File (*.csv);;YAML File (*.yaml);;All Files (*)")
-        if 'yaml' in extension and ('.yaml' not in filename):
-            filename += '.yaml'
-        if 'geojson' in extension and ('.geojson' not in filename):
-            filename += '.geojson'
+        #filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","GEOJSON File (*.geojson);;CSV File (*.csv);;YAML File (*.yaml);;All Files (*)")
+        #if 'yaml' in extension and ('.yaml' not in filename):
+        #    filename += '.yaml'
+        #if 'geojson' in extension and ('.geojson' not in filename):
+        #    filename += '.geojson'
+        #if 'csv' in extension and ('.csv' not in filename):
+        #    filename += '.csv'        
+        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","All Files (*)")
+
+        if(len(filename) > 0):
+            # Save the files
+            if stype is 'yaml':
+                create_yaml_summary(yaml_dict,filename)
+            if stype is 'geojson':            
+                create_geojson_summary(yaml_dict,filename)
+
+    def save_csv(self):
+        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","CSV File (*.csv);;All Files (*)")
         if 'csv' in extension and ('.csv' not in filename):
             filename += '.csv'
 
-        # Save the files
-        if 'yaml' in extension:                
-            create_yaml_summary(yaml_dict,filename)                
-        elif 'csv' in extension:                
-            create_csv_summary(yaml_dict,filename)
-        elif 'geojson' in extension:                            
-            create_geojson_summary(yaml_dict,filename)            
+        yaml_dict    = self.create_cast_summary()
+        create_csv_summary(yaml_dict,filename)
 
     def create_station_summary(self):
         """ Creates a summary of all stations read in
@@ -1310,7 +1336,7 @@ class mainWidget(QtWidgets.QWidget):
         # Opening the yaml file
         try:
             stream = open(filename_all, 'r')
-            data_yaml = yaml.load(stream)
+            data_yaml = yaml.safe_load(stream)
         except Exception as e:
             # TODO warning message, bad data
             msg = QtWidgets.QMessageBox()
