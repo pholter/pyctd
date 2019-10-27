@@ -1,3 +1,8 @@
+0.4.1:
+        - outsourced pysst
+	- load/save functionality improved (yaml, geojson for qgis)
+	- added transects/campaigns and research vessels
+	- infrastructure improved to work as a qgis plugin
 0.4.0:
         - outsourced pycnv
 	- Added tabs and station table

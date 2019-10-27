@@ -1,6 +1,6 @@
 from pycnv import pycnv, pycnv_sum_folder
-from ..sst import pymrd as pymrd
-from ..sst import pymrd_sum_folder as pymrd_sum_folder
+from pysst import pymrd as pymrd
+from pysst import pymrd_sum_folder as pymrd_sum_folder
 import sys
 import os
 import logging
@@ -440,7 +440,7 @@ class mainWidget(QtWidgets.QWidget):
 
         self.save['save'].setMaximumWidth(width)
         self.save['load'] = QtWidgets.QPushButton('Load')
-        self.save['load'].clicked.connect(self.load_summary)
+        self.save['load'].clicked.connect(self.load_file)
         self.save['layout'] = QtWidgets.QGridLayout(self.save['widget'])
         self.save['layout'].addWidget(self.save['save'],0,0)
         self.save['layout'].addWidget(self.save['save_geojson'],1,0)                
@@ -454,9 +454,11 @@ class mainWidget(QtWidgets.QWidget):
         table_columns                     = {}
         table_columns['Name']             = 0        
         table_columns['Project']          = 1
-        table_columns['Contact (name)']   = 2        
-        table_columns['Contact (email)']  = 3
-        self.camp['index_ship'] = 4
+        table_columns['Begin']            = 2
+        table_columns['End']              = 3        
+        table_columns['Contact (name)']   = 4
+        table_columns['Contact (email)']  = 5
+        self.camp['index_ship'] = 6
         i = self.camp['index_ship']
         # Add ship columns        
         for k in ships['ships'][0].keys():
@@ -499,7 +501,8 @@ class mainWidget(QtWidgets.QWidget):
         self.tran['table']  = QtWidgets.QTableWidget()
         self.tran['layout'] = QtWidgets.QGridLayout(self.tran['widget'])
         self.tran['layout'].addWidget(self.tran['table'])
-        #self.tran['station_table'].cellChanged.connect(self._update_station_table)                
+        #self.tran['station_table'].cellChanged.connect(self._update_station_table)
+        self.tran_dict = {}
 
     def setup_stations_widget(self):
         self.stations = {}
@@ -623,21 +626,16 @@ class mainWidget(QtWidgets.QWidget):
         for i in range(len(tran_names)):
             numbers = np.asarray(tran_numbers[i])
             isort = np.argsort(numbers)
-            tran_numbers[i]       = np.asarray(tran_numbers[i])[isort]
-            tran_station_names[i] = np.asarray(tran_station_names[i])[isort]
-            tran_station_lon[i]   = np.asarray(tran_station_lon[i])[isort]
-            tran_station_lat[i]   = np.asarray(tran_station_lat[i])[isort]            
+            tran_numbers[i]       = np.asarray(tran_numbers[i])[isort].tolist()
+            tran_station_names[i] = np.asarray(tran_station_names[i])[isort].tolist()
+            tran_station_lon[i]   = np.asarray(tran_station_lon[i])[isort].tolist()
+            tran_station_lat[i]   = np.asarray(tran_station_lat[i])[isort].tolist()   
 
-        self.tran['name']          = tran_names
-        self.tran['numbers']       = tran_numbers
-        self.tran['station_names'] = tran_station_names
-        self.tran['station_lon']   = tran_station_lon
-        self.tran['station_lat']   = tran_station_lat
-        #print(tran_names)
-        #print(tran_numbers)
-        #print(tran_station_names)
-        #print(tran_station_lon)
-        #print(tran_station_lat)                                
+        self.tran_dict['name']          = tran_names
+        #self.tran_dict['numbers']       = tran_numbers # Not really needed
+        self.tran_dict['station_names'] = tran_station_names
+        self.tran_dict['station_lon']   = tran_station_lon
+        self.tran_dict['station_lat']   = tran_station_lat
 
     def station_table_cellchanged(self):
         col = self.stations['station_table'].currentColumn()
@@ -668,7 +666,6 @@ class mainWidget(QtWidgets.QWidget):
         """
         # Adding a new column for the transect
         table = self.stations['station_table']
-        # TODO, create column names according to the data structures
         ncolumns = table.columnCount()
         ncolumns += 1
         table.setColumnCount(ncolumns)
@@ -700,7 +697,9 @@ class mainWidget(QtWidgets.QWidget):
         for row in rows:
             #print('Row %d is selected' % row)
             self.stations['station_table'].removeRow(row)
-            self.stations['station_table_nrows'] -= 1            
+            self.stations['station_table_nrows'] -= 1
+
+        self.update_transects()
 
     def _update_station_table(self):
         self.stations['station_table'].resizeColumnsToContents()
@@ -726,6 +725,28 @@ class mainWidget(QtWidgets.QWidget):
         if(update_table):
             self._update_station_table()
 
+    def campaign_add_from_dict(self,data_yaml):
+        """ Adds a campaign from a saved yaml file
+        """
+
+        table = self.camp['table']
+        nrows = table.rowCount()
+        ncols = table.columnCount()
+        header = []
+        for i in range(ncols):
+            header.append(table.horizontalHeaderItem(i).text())
+
+        self.camp['table'].insertRow(self.camp['table_nrows'])
+
+        for camp in data_yaml['campaigns']:
+            for i,head in enumerate(header):
+                if(head in camp):
+                    item = QtWidgets.QTableWidgetItem(camp[head])
+                    self.camp['table'].setItem(self.camp['table_nrows'],i, item)
+
+        self.camp['table_nrows'] += 1        
+        self.camp['table'].resizeColumnsToContents()            
+
     def _campaign_add_ship(self):
         self.camp['index_ship']
         i = self.camp['ship_combo'].currentIndex()
@@ -748,7 +769,6 @@ class mainWidget(QtWidgets.QWidget):
 
         self.camp['table'].resizeColumnsToContents()
 
-            
     def _campaign_add_blank(self):
         #print('Station add blank')
         item = QtWidgets.QTableWidgetItem('Campaign  ' + str(self.camp['table_nrows']))
@@ -756,7 +776,17 @@ class mainWidget(QtWidgets.QWidget):
         self.camp['table'].setItem(self.camp['table_nrows'],0, item)
         self.camp['table_nrows'] += 1
         self.camp['table'].resizeColumnsToContents()
-        #self._update_station_table()            
+        #self._update_station_table()
+
+    def _station_add_from_dict(self,data_yaml):
+        """ Add stations from a dictionary 
+        """
+        item = QtWidgets.QTableWidgetItem('Station  ' + str(self.stations['station_table_nrows']))
+        self.stations['station_table'].insertRow(self.stations['station_table_nrows'])        
+        self.stations['station_table'].setItem(self.stations['station_table_nrows'],0, item)
+        self.stations['station_table_nrows'] += 1
+        #self.stations['station_table'].resizeColumnsToContents()
+        self._update_station_table()
 
     def _station_add_blank(self):
         #print('Station add blank')
@@ -929,7 +959,6 @@ class mainWidget(QtWidgets.QWidget):
         self.choose_campaign['widget'].show()
 
     def _table_choose_campaign_to_casts(self):
-        print('Hallo! Campaign')
         rows = sorted(set(index.row() for index in
                           self.choose_campaign['table'].selectedIndexes()),reverse=False)
 
@@ -1191,7 +1220,6 @@ class mainWidget(QtWidgets.QWidget):
         # Resize the columns
         self.file_table.resizeColumnsToContents()
         
-
     def status_function(self,call_object,i,nf,f):
         if(i == 0):
             self._progress_bar.setMaximum(nf)
@@ -1202,20 +1230,38 @@ class mainWidget(QtWidgets.QWidget):
         #self._i_widget.setText(tstr)
         self._f_widget.setText(fstr)
 
-    def save_all(self):        
-        #self.save(casts=True,stations=True,transects=True)
-        self.save_data(casts=True,stations=True,transects=True,campaigns=True)
+    def save_all(self):
+        # Do the actual saving
+        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","All Files (*)")
+        if(len(filename) > 0):
+            filename_casts = filename + '_casts'
+            filename_meta  = filename + '_meta'
+            try: # Test if there are casts at all
+                cnt = len(self.data['info_dict'])
+            except:
+                cnt = 0
+
+            if(cnt > 0):
+                self.save_data(filename_casts,casts=True,stations=False,transects=False,campaigns=False)
+                
+            self.save_data(filename_meta, casts=False,stations=True,transects=True,campaigns=True)        
 
     def save_geojson(self):
-        self.save_data(casts=True,stations=True,transects=True,stype='geojson')
+        # Do the actual saving
+        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","All Files (*)")
         
-    def save_data(self,casts=False,stations=False,transects=False,campaigns=False,stype='yaml'):
+        if(len(filename) > 0):
+            self.save_data(filename,casts=True,stations=True,transects=True,stype='geojson')
+        
+    def save_data(self,filename, casts=False,stations=False,transects=False,campaigns=False,stype='yaml'):
         """ This function saves everything (casts, stations, transects)
         """
         cast_dict    = self.create_cast_summary()
         station_dict = self.create_station_summary()
-        transect_dict = self.create_transect_summary()        
+        transect_dict = self.create_transect_summary()
+        campaign_dict = self.create_campaign_summary()
         yaml_dict = {}
+
         if casts:
             yaml_dict.update(cast_dict)
         if stations:
@@ -1223,18 +1269,8 @@ class mainWidget(QtWidgets.QWidget):
         if transects:
             yaml_dict.update(transect_dict)
         if campaigns:
-            pass
+            yaml_dict.update(campaign_dict)
         
-        # Do the actual saving
-        cwd = os.getcwd()
-        #filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","GEOJSON File (*.geojson);;CSV File (*.csv);;YAML File (*.yaml);;All Files (*)")
-        #if 'yaml' in extension and ('.yaml' not in filename):
-        #    filename += '.yaml'
-        #if 'geojson' in extension and ('.geojson' not in filename):
-        #    filename += '.geojson'
-        #if 'csv' in extension and ('.csv' not in filename):
-        #    filename += '.csv'        
-        filename,extension  = QtWidgets.QFileDialog.getSaveFileName(self,"Choose file for summary","","All Files (*)")
 
         if(len(filename) > 0):
             # Save the files
@@ -1281,11 +1317,10 @@ class mainWidget(QtWidgets.QWidget):
         #self.tran['station_lon']   = tran_station_lon
         #self.tran['station_lat']   = tran_station_lat
         yaml_dict = {}
-        yaml_dict['transects'] = self.tran
+        yaml_dict['transects'] = self.tran_dict
         
         return yaml_dict
 
-            
     def create_cast_summary(self):
         """ Creates a summary from the given sum_dict for all casts read in
         """
@@ -1323,7 +1358,37 @@ class mainWidget(QtWidgets.QWidget):
                 
         return yaml_dict
 
+    def create_campaign_summary(self):
+        """ Reads in the campaign table in self.camp['table'] and creates a dictionary out of it
+        """
+
+        table = self.camp['table']
+        nrows = table.rowCount()
+        ncols = table.columnCount()
+        campaigns = []
+        header = []
+        for i in range(ncols):
+            header.append(table.horizontalHeaderItem(i).text())
+
+        for i in range(nrows):
+            camp = {}
+            for j in range(ncols):
+                it = table.item(i,j)
+                if(it is not None):
+                    dstr = it.text()
+                else:
+                    dstr = ''
+                    
+                camp[header[j]] = dstr
+
+            campaigns.append(camp)
+        
+        return {'campaigns':campaigns}
+        
+
     def create_cruise_summary(self):
+        """ outdated, candidate to remove
+        """
         try:
             self._cruise_fields['Cruise ID']
         except:
@@ -1347,8 +1412,42 @@ class mainWidget(QtWidgets.QWidget):
 
         
         create_yaml_summary(yaml_dict,filename)
-        
-        
+
+
+    def load_file(self):
+        """ Loads a file and merges it into the existing data
+        """
+        filename_all,extension  = QtWidgets.QFileDialog.getOpenFileName(self,"Choose existing summary file","","YAML File (*.yaml);;All Files (*)")
+        filename                =  os.path.basename(filename_all) # Get the filename
+        dirname                 =  os.path.dirname(filename_all)  # Get the path
+        if(len(filename_all) == 0):
+            return
+
+
+        # Opening the yaml file
+        try:
+            stream = open(filename_all, 'r')
+            data_yaml = yaml.safe_load(stream)
+        except Exception as e:
+            # TODO warning message, bad data
+            msg = QtWidgets.QMessageBox()
+            msg.setIcon(QtWidgets.QMessageBox.Warning)
+            msg.setInformativeText('No valid or not existing yaml file')
+            retval = msg.exec_()            
+            return        
+
+        if('campaigns' in data_yaml):
+            print('Having campaigns')
+            self.campaign_add_from_dict(data_yaml)
+
+        if('stations' in data_yaml):
+            print('Having stations')
+            self.station_add_from_dict(stations_yaml = data_yaml)
+
+        if('transects' in data_yaml):
+            print('Having transects')
+            self.transect_add_from_dict(data_yaml)                                    
+
     def load_summary(self):
         filename_all,extension  = QtWidgets.QFileDialog.getOpenFileName(self,"Choose existing summary file","","YAML File (*.yaml);;All Files (*)")
         filename                =  os.path.basename(filename_all) # Get the filename
@@ -1395,7 +1494,7 @@ class mainWidget(QtWidgets.QWidget):
 
             
         self.data = self.compare_and_merge_data(self.data,data)        
-        self.create_table()        
+        self.create_table()
         self.update_table()
 
         
@@ -1458,27 +1557,65 @@ class mainWidget(QtWidgets.QWidget):
     def _cruise_cancel(self):
         self.cruise_widget.hide()
 
-    def add_station_file(self, stations_file = None):
-        combo_text = self.stations['station_known_stations'].currentText()
-        if('Station File' in combo_text):
-            files_types = "YAML (*.yml);; All (*)"
-            fchoosen = QtWidgets.QFileDialog.getOpenFileName(self, "Select Station File",'',files_types)
-            stations_file = fchoosen[0]
-        elif('IOW Monitoring' in combo_text):
-            stations_file = pkg_resources.resource_filename('pycnv', 'stations/iow_stations.yaml')
+    def add_station_file(self):
+        """ Function to get a filename for loading a station
+        """ 
+        if True:
+            combo_text = self.stations['station_known_stations'].currentText()
+            if('Station File' in combo_text):
+                files_types = "YAML (*.yml);; All (*)"
+                fchoosen = QtWidgets.QFileDialog.getOpenFileName(self, "Select Station File",'',files_types)
+                stations_file = fchoosen[0]
+            elif('IOW Monitoring' in combo_text):
+                stations_file = pkg_resources.resource_filename('pycnv', 'stations/iow_stations.yaml')
 
-        try:
-            f_stations = open(stations_file)
-        except Exception as e:
-            print('Could not open file:' + stations_file)
-            return
-        # use safe_load instead load
-        stations_yaml = yaml.safe_load(f_stations)
-        f_stations.close()
+            try:
+                f_stations = open(stations_file)
+            except Exception as e:
+                print('Could not open file:' + stations_file)
+                return
+            
+            # use safe_load instead load
+            print('Loading stations yaml')
+            stations_yaml = yaml.safe_load(f_stations)
+            f_stations.close()
+            
+        self.station_add_from_dict(stations_yaml)
+
+    def transect_add_from_dict(self, transects_yaml):
+        """ Adding the transects from the dictionary into the station table and doing an update
+        """
+        table = self.stations['station_table'] 
+        nrows = table.rowCount()
+        ncols = table.columnCount()        
+        for i,name in enumerate(transects_yaml['transects']['name']):
+            # Adding a new column for the transect
+            table = self.stations['station_table']
+            ncolumns = table.columnCount()
+            ncolumns += 1
+            table.setColumnCount(ncolumns)
+            headeritem = QtWidgets.QTableWidgetItem(name)        
+            table.setHorizontalHeaderItem(ncolumns-1,headeritem)
+            for j,sname in enumerate(transects_yaml['transects']['station_names'][i]): # Loop through all stations and search for the same name
+                for k in range(nrows):
+                    ssname = table.item(k,0).text()
+                    print(sname,ssname)
+                    if(ssname == sname): # Found the same name
+                        print('Found')
+                        item = QtWidgets.QTableWidgetItem(str(j))                        
+                        table.setItem(k,ncolumns-1,item)
+                        break
+        self.update_transects()                
+        table.resizeColumnsToContents()
+            
+    def station_add_from_dict(self, stations_yaml = None):        
+#    def add_station_file_dict(self, stations_file = None, stations_yaml = None):
         for i,station in enumerate(stations_yaml['stations']):
             name = station['name']
-            lon  = station['longitude']
-            lat  = station['latitude']    
+            #lon  = station['longitude']
+            #lat  = station['latitude']
+            lon  = station['lon']
+            lat  = station['lat']                
             self._station_add(name,lon,lat,update_table=False)
 
         self._update_station_table()            
