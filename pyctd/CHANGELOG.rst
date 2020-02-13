@@ -1,3 +1,6 @@
+0.4.2:
+        - some bugfixes (i.e. crash geojson)
+	- improved searching capability (lon,lat, start, stop)
 0.4.1:
         - outsourced pysst
 	- load/save functionality improved (yaml, geojson for qgis)

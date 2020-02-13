@@ -16,6 +16,7 @@ import pkg_resources
 import re
 import numpy as np
 import geojson
+from pytz import timezone
 
 # Get the version
 version_file = pkg_resources.resource_filename('pyctd','VERSION')
@@ -44,6 +45,26 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
+
+def str_to_time(timestr):
+    """ Converts a timestr to a datetime object
+    Args:
+        timestr: The timestr
+    Returns:
+        List with first entry a boolean if the conversion was sucessfull and a second entry the datetime object
+    """
+    good_time = False
+    try:
+        d = datetime.datetime.strptime(timestr,'%Y-%m-%d %H:%M:%S')
+        d = d.replace(tzinfo=timezone('UTC'))
+        good_time = True
+    except Exception as e:
+        print(e)
+        d = None
+
+    print('d',d)
+    return [good_time,d]
+        
 
 def create_geojson_summary(summary,filename,name='CTD',properties='all'):
     """ Creates a geojson summary
@@ -75,14 +96,19 @@ def create_geojson_summary(summary,filename,name='CTD',properties='all'):
     
     if(len(properties) > 0):
         features = []
+        print(properties)
         for i,d in enumerate(summary['casts']):
+            print(d)
             csv_line = ''
             lon = d['lon']
             lat = d['lat']
             p = geojson.Point((lon, lat))
             prop = {}
             for o in properties:
-                prop[o] = d[o]
+                if(o in d):
+                    prop[o] = d[o]
+                else: # Property not there, e.g. station not existing in MRD files.
+                    pass
 
             feature = geojson.Feature(geometry=p, properties=prop)
             features.append(feature)
@@ -180,13 +206,25 @@ def create_csv_summary(summary,filename,order=['date','lon','lat','station','fil
 
 class get_valid_files(QtCore.QThread):
     """ A thread to search a directory for valid files
+    Arguments:
+       foldername:
+       search_seabird: 
+       search_mrd:
+       start_time: type datetime
+       stop_time: type datetime
+       station: 
     """
     search_status = QtCore.pyqtSignal(object,int,int,str) # Create a custom signal
-    def __init__(self,foldername,search_seabird = True,search_mrd = True):
+    def __init__(self, foldername, search_seabird = True, search_mrd = True, start_time = None, stop_time = None, station = None):
         QtCore.QThread.__init__(self)
         self.foldername = foldername
         self.search_seabird = search_seabird
         self.search_mrd = search_mrd
+        self.start_time = start_time
+        self.stop_time  = stop_time
+        self.station    = station
+        #print('Search seabird',self.search_seabird)        
+        #print('Search MRD',self.search_mrd)
         
     def __del__(self):
         self.wait()
@@ -196,10 +234,21 @@ class get_valid_files(QtCore.QThread):
         #pycnv_sum_folder.get_all_valid_files(foldername,status_function=self.status_function)
         #https://stackoverflow.com/questions/39658719/conflict-between-pyqt5-and-datetime-datetime-strptime
         locale.setlocale(locale.LC_TIME, "C")
-        data_tmp = pycnv_sum_folder.get_all_valid_files(self.foldername,loglevel = logging.WARNING,status_function=self.status_function)
-        self.data = data_tmp
         
+        if((type(self.start_time) == datetime.datetime)):
+            start_time = self.start_time
+        else:
+            start_time = None
+
+        if((type(self.stop_time) == datetime.datetime)):
+            stop_time = self.stop_time
+        else:
+            stop_time = None            
+            
+        data_tmp = pycnv_sum_folder.get_all_valid_files(self.foldername,loglevel = logging.WARNING,status_function=self.status_function, station = self.station,start_time = start_time,stop_time=stop_time)
+        self.data = data_tmp
         if(self.search_mrd):
+            #print('Search for SST files')
             data_tmp = pymrd_sum_folder.get_all_valid_files(self.foldername,loglevel = logging.WARNING,status_function=self.status_function)
             if True:
                 for key in self.data.keys():
@@ -395,8 +444,60 @@ class mainWidget(QtWidgets.QWidget):
         self._search_opt_mrd = QtWidgets.QCheckBox('Sea & Sun mrd')
         self._search_opt_cnv.toggle() # put in on
         self._search_opt_mrd.toggle() # put in on
-        layout.addWidget(self._search_opt_cnv,0,0)
-        layout.addWidget(self._search_opt_mrd,1,0)
+        self._search_opt_start = QtWidgets.QLineEdit(self.search_opts_widget)
+        self._search_opt_start.editingFinished.connect(self._check_search_input)
+        self._search_opt_start_lastvalid = '0001-01-01 00:00:00'
+        self._search_opt_start.setText(self._search_opt_start_lastvalid)
+        self._search_opt_end   = QtWidgets.QLineEdit(self.search_opts_widget)
+        self._search_opt_end.editingFinished.connect(self._check_search_input)
+        self._search_opt_end_lastvalid = '3001-01-01 00:00:00'        
+        self._search_opt_end.setText(self._search_opt_end_lastvalid)
+        # Radius search
+        self._search_opt_lonc  = QtWidgets.QLineEdit(self.search_opts_widget)
+        self._search_opt_lonc.editingFinished.connect(self._check_search_input)        
+        self._search_opt_latc  = QtWidgets.QLineEdit(self.search_opts_widget)
+        self._search_opt_latc.editingFinished.connect(self._check_search_input)                
+        self._search_opt_radius= QtWidgets.QLineEdit(self.search_opts_widget)
+        self._search_opt_radius.editingFinished.connect(self._check_search_input)                        
+        # Rectangle search
+        self._search_opt_lonc0  = QtWidgets.QLineEdit(self.search_opts_widget)
+        self._search_opt_lonc0.editingFinished.connect(self._check_search_input)        
+        self._search_opt_latc0  = QtWidgets.QLineEdit(self.search_opts_widget)
+        self._search_opt_latc0.editingFinished.connect(self._check_search_input)        
+        self._search_opt_lonc1  = QtWidgets.QLineEdit(self.search_opts_widget)
+        self._search_opt_lonc1.editingFinished.connect(self._check_search_input)        
+        self._search_opt_latc1  = QtWidgets.QLineEdit(self.search_opts_widget)
+        self._search_opt_latc1.editingFinished.connect(self._check_search_input)
+        # Which position
+        self._search_opt_pos = QtWidgets.QComboBox()
+        self._search_opt_pos.addItem('None')        
+        self._search_opt_pos.addItem('Station with radius')
+        self._search_opt_pos.addItem('Rectangle')                
+        layout.addWidget(self._search_opt_cnv,0,0,1,2)
+        layout.addWidget(self._search_opt_mrd,1,0,1,2)
+        layout.addWidget( QtWidgets.QLabel('Start time'),2,0)      
+        layout.addWidget(self._search_opt_start,2,1)
+        layout.addWidget( QtWidgets.QLabel('End time'),3,0)
+        layout.addWidget(self._search_opt_end,3,1)
+        layout.addWidget( QtWidgets.QLabel('Choose position type for search'),4,0)
+        layout.addWidget(self._search_opt_pos,4,1)
+        layout.addWidget( QtWidgets.QLabel('Position (Point with radius)'),5,0,1,4)        
+        layout.addWidget( QtWidgets.QLabel('Longitude [decDeg]'),6,0)
+        layout.addWidget( QtWidgets.QLabel('Latitude [decDeg]'),6,1)
+        layout.addWidget( QtWidgets.QLabel('Radius [m]'),6,2)                
+        layout.addWidget(self._search_opt_lonc,7,0)
+        layout.addWidget(self._search_opt_latc,7,1)
+        layout.addWidget(self._search_opt_radius,7,2)
+        layout.addWidget( QtWidgets.QLabel('Position (Rectangle)'),8,0,1,4)        
+        layout.addWidget( QtWidgets.QLabel('Longitude min [decDeg]'),9,0)
+        layout.addWidget( QtWidgets.QLabel('Longitude max [decDeg]'),9,1)        
+        layout.addWidget( QtWidgets.QLabel('Latitude min [decDeg]'),9,2)
+        layout.addWidget( QtWidgets.QLabel('Latitude max [decDeg]'),9,3)
+        layout.addWidget(self._search_opt_lonc0,10,0)
+        layout.addWidget(self._search_opt_lonc1,10,1)        
+        layout.addWidget(self._search_opt_latc0,10,2)
+        layout.addWidget(self._search_opt_latc1,10,3)                
+        
         self.search_opts_widget.hide()
 
         # Station/stations widget
@@ -421,6 +522,32 @@ class mainWidget(QtWidgets.QWidget):
 
         # Map plotting settings
         self._map_settings = {'res':'110m'}
+
+    def _check_search_input(self):
+        print('Input done')
+        w = self.sender()
+        if(( w == self._search_opt_start) or ( w == self._search_opt_end)):
+            print('Time test')
+            [good_time,t] = str_to_time(w.text())
+            print([good_time,t])
+            if(good_time == False):
+                if(w == self._search_opt_start):
+                    self._search_opt_start.setText(self._search_opt_start_lastvalid)                    
+                if(w == self._search_opt_end):
+                    self._search_opt_end.setText(self._search_opt_end_lastvalid)
+
+            else:
+                if(w == self._search_opt_start):                
+                    self._search_opt_start_lastvalid = w.text()
+                if(w == self._search_opt_end):                
+                    self._search_opt_end_lastvalid = w.text()          
+        else:
+            try:
+                float(w.text())
+            except:
+                w.setText('')
+                
+        print(w.text())
         
     def setup_plot_widget(self):
         self.plot = {}
@@ -1049,13 +1176,39 @@ class mainWidget(QtWidgets.QWidget):
             self._progress_bar       = QtWidgets.QProgressBar(self.status_widget)
             #self._thread_stop_button = QtWidgets.QPushButton('Stop')
             #self._thread_stop_button.clicked.connect(self.search_stop)
-            self._f_widget           = QtWidgets.QLabel('Hallo f')
+            self._f_widget           = QtWidgets.QLabel('Filename')
             self._f_widget.setWordWrap(True)
-            self.status_layout.addWidget(self._progress_bar,0,0)
-            self.status_layout.addWidget(self._f_widget,1,0)
+            self.status_layout.addWidget(QtWidgets.QLabel('Loading files'),0,0)            
+            self.status_layout.addWidget(self._progress_bar,1,0)
+            self.status_layout.addWidget(self._f_widget,2,0)
             #self.status_layout.addWidget(self._thread_stop_button,2,0)
             self.status_widget.show()
-            self.search_thread = get_valid_files(foldername,search_seabird=self._search_opt_cnv.isChecked(), search_mrd = self._search_opt_mrd.isChecked())
+            # Check for the positional thresholds
+            print('Hallo!',self._search_opt_pos.currentText())
+            if 'None' in self._search_opt_pos.currentText():
+                print('No position search')
+                station = None
+            elif 'Station' in self._search_opt_pos.currentText():
+                print('Station position search')                
+                # TODO, this has to be parsed with pylatlon
+                lon     = float(self._search_opt_lonc.text())
+                lat     = float(self._search_opt_latc.text())
+                radius  = float(self._search_opt_radius.text())                
+                station = [lon,lat,radius]
+            elif 'Rectangle' in self._search_opt_pos.currentText():
+                print('Rectangle position search')
+                # TODO, this has to be parsed with pylatlon                
+                lon0     = float(self._search_opt_lonc0.text())
+                lat0     = float(self._search_opt_latc0.text())
+                lon1     = float(self._search_opt_lonc1.text())
+                lat1     = float(self._search_opt_latc1.text())
+                station = [lon0,lat0,lon1,lat1]
+
+            print('Station',station)
+            # Check for the time thresholds
+            start_time = str_to_time(self._search_opt_start.text())[1]
+            stop_time = str_to_time(self._search_opt_end.text())[1]
+            self.search_thread = get_valid_files(foldername,search_seabird=self._search_opt_cnv.isChecked(), search_mrd = self._search_opt_mrd.isChecked(),start_time=start_time,stop_time = stop_time,station=station)
             self.search_thread.start()
             self.search_thread.search_status.connect(self.status_function)
             self.search_thread.finished.connect(self.search_finished)
@@ -1075,6 +1228,8 @@ class mainWidget(QtWidgets.QWidget):
         self.status_widget.close()
         data = self.search_thread.data
         self.data = self.compare_and_merge_data(self.data,data)
+        print('Search finished')
+        #print(data)
         if(self.FLAG_REL_PATH):
             for i,c in enumerate(self.data['info_dict']):
                 fname = c['file']
@@ -1087,7 +1242,7 @@ class mainWidget(QtWidgets.QWidget):
     def compare_and_merge_data(self, data, data_new, new_station=True, new_comment=True):
         """ Checks in data field if new data is already there, if not it adds it, otherwise it rejects it, it also add pyctd specific data fields, if they not already exist
         """
-        
+        print('Compare and merge')
         try:
             data_new['pyctd_plot_map']
         except:
@@ -1153,13 +1308,31 @@ class mainWidget(QtWidgets.QWidget):
             self.file_table.insertRow(i)
             
 
-    def update_table(self):        
+    def update_table(self):
+        #print('Update table')
+        #print(len(self.data['pyctd_campaign']))
+        #print(len(self.data['info_dict']))
         # Fill the table
         try:
             cnt = len(self.data['info_dict'])
         except:
             cnt = 0
+
+        if(cnt > 0):
+            self._status_widget_tmp    = QtWidgets.QWidget()
+            self._status_layout_tmp    = QtWidgets.QVBoxLayout(self._status_widget_tmp)            
+            self._progress_bar_tmp     = QtWidgets.QProgressBar()
+            self._status_layout_tmp.addWidget(QtWidgets.QLabel('Updating table'))
+            self._status_layout_tmp.addWidget(self._progress_bar_tmp)
+            self._status_widget_tmp.show()
+            self._progress_bar_tmp.setMaximum(cnt)            
         for i in range(cnt):
+            # Create a progress bar
+            self._progress_bar_tmp.setValue(i)
+            # A poor mans solution to avoid blocking after reading a lot of data, better would be a thread
+            # https://stackoverflow.com/questions/24738333/pyqt-gui-freezes-while-in-loop
+            if(i%5 == 0):
+                QtCore.QCoreApplication.processEvents()
             # Add date
             date = self.data['info_dict'][i]['date']
             item = QtWidgets.QTableWidgetItem( date.strftime('%Y-%m-%d %H:%M:%S' ))
@@ -1217,6 +1390,11 @@ class mainWidget(QtWidgets.QWidget):
             item.setFlags(item.flags() ^ QtCore.Qt.ItemIsEditable) # Unset to not have it editable
             self.file_table.setItem(i,self.columns['file'], item)
 
+        # If the widget is open
+        try:
+            self._status_widget_tmp.close()
+        except:
+            pass
         # Resize the columns
         self.file_table.resizeColumnsToContents()
         
