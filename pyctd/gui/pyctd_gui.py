@@ -433,8 +433,9 @@ class mainWidget(QtWidgets.QWidget):
 
         self.FLAG_REL_PATH = True
         self.dpi       = 100
-        self.data = {}
-        self._cruise_fields = {}
+        # Create data fields
+        self._init_data_fields()
+
 
 
         # Search options widget
@@ -522,6 +523,12 @@ class mainWidget(QtWidgets.QWidget):
 
         # Map plotting settings
         self._map_settings = {'res':'110m'}
+
+    def _init_data_fields(self):
+        """ Create a fresh init of all necessary data fields
+        """
+        self.data = {}
+        self._cruise_fields = {}        
 
     def _check_search_input(self):
         print('Input done')
@@ -1142,21 +1149,8 @@ class mainWidget(QtWidgets.QWidget):
         self.cast_figwidget.show()
 
     def clear_table_clicked(self):
-        try:
-            self.data['files']
-        except:
-            return
-        # Remove from plot
-        for row in range(len(self.data['files'])):            
-            while self.data['pyctd_plot_map'][row]:
-                tmpdata = self.data['pyctd_plot_map'][row].pop()
-                for line in tmpdata:
-                    line.remove()
-        try:
-            self.canvas.draw()
-        except:
-            pass
-        
+        # Remove all data fields and start fresh
+        self._init_data_fields()
         self.file_table.setRowCount(0)
         
     def folder_clicked(self):
